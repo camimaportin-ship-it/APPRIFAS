@@ -920,6 +920,53 @@ app.get('/api/stats', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ----------------------------- ADMIN DASHBOARD ---------------------------------
+
+app.get('/api/admin/dashboard', requireRole('super_admin', 'admin'), (req, res) => {
+  try {
+    const empresa = db.prepare('SELECT * FROM empresa WHERE id = 1').get();
+
+    const totalRifas = db.prepare("SELECT COUNT(*) c FROM rifas WHERE borrada_en IS NULL").get().c;
+    const rifasActivas = db.prepare("SELECT COUNT(*) c FROM rifas WHERE borrada_en IS NULL AND estado = 'activa'").get().c;
+    const rifasSorteadas = db.prepare("SELECT COUNT(*) c FROM rifas WHERE borrada_en IS NULL AND estado = 'sorteada'").get().c;
+    const totalParticipantes = db.prepare("SELECT COUNT(*) c FROM participantes").get().c;
+    const pagados = db.prepare("SELECT COUNT(*) c FROM participantes WHERE estado_pago = 'pagado'").get().c;
+    const pendientes = db.prepare("SELECT COUNT(*) c FROM participantes WHERE estado_pago = 'pendiente'").get().c;
+    const recaudado = db.prepare("SELECT COALESCE(SUM(p.valor_boleta), 0) total FROM participantes part JOIN rifas p ON part.rifa_id = p.id WHERE part.estado_pago = 'pagado'").get().total;
+
+    const rifas = db.prepare(`
+      SELECT r.id, r.nombre, r.producto, r.estado, r.valor_boleta, r.modalidad_boleta,
+             r.fecha_sorteo, r.max_participants,
+             COUNT(part.id) as vendidos,
+             SUM(CASE WHEN part.estado_pago='pagado' THEN 1 ELSE 0 END) as pagados,
+             SUM(CASE WHEN part.estado_pago='pendiente' THEN 1 ELSE 0 END) as pendientes
+      FROM rifas r
+      LEFT JOIN participantes part ON r.id = part.rifa_id
+      WHERE r.borrada_en IS NULL
+      GROUP BY r.id
+      ORDER BY r.estado = 'activa' DESC, r.fecha_sorteo ASC
+    `).all();
+
+    const participantesRecientes = db.prepare(`
+      SELECT part.id, part.nombre, part.cedula, part.telefono, part.estado_pago,
+             part.fecha_registro, r.nombre as rifa_nombre
+      FROM participantes part
+      JOIN rifas r ON part.rifa_id = r.id
+      ORDER BY part.fecha_registro DESC
+      LIMIT 15
+    `).all();
+
+    const usuarios = db.prepare("SELECT id, usuario, nombre, email, rol FROM usuarios ORDER BY nombre").all();
+    const sesionesActivasCount = db.prepare("SELECT COUNT(*) c FROM push_subscriptions WHERE activa = 1").get().c;
+    const logsRecientes = db.prepare(`
+      SELECT id, fecha, accion, entidad, rifa_nombre, detalle
+      FROM logs ORDER BY fecha DESC LIMIT 8
+    `).all();
+
+    res.json({ empresa, totalRifas, rifasActivas, rifasSorteadas, totalParticipantes, pagados, pendientes, recaudado, rifas, participantesRecientes, usuarios, sesionesActivasCount, logsRecientes });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // -------------------------------- RIFAS ----------------------------------------
 
 // Crear rifa (con imágenes)

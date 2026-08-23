@@ -391,6 +391,9 @@ async function router() {
     } else if (parts[0] === 'admin' && parts[1] === 'usuarios') {
       document.getElementById('page-title').textContent = 'Administración de Usuarios';
       await renderAdminUsuarios(container);
+    } else if (parts[0] === 'admin') {
+      document.getElementById('page-title').textContent = 'Panel de Control';
+      await renderAdminDashboard(container);
     } else {
       document.getElementById('page-title').textContent = 'Mis rifas';
       await vistaListaRifas();
@@ -4067,6 +4070,190 @@ function urlBase64ToUint8Array(base64String) {
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
   return outputArray;
+}
+
+// ================================================================================
+// VISTA: PANEL DE CONTROL (ADMIN DASHBOARD)
+// ================================================================================
+
+async function renderAdminDashboard(container) {
+  container.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>Cargando panel de control...</p></div>';
+  try {
+    const d = await api('/admin/dashboard');
+    const e = d.empresa || {};
+
+    const fmtPct = (a, b) => b > 0 ? Math.round((a / b) * 100) : 0;
+
+    container.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2 style="margin:0;">📊 Panel de Control</h2>
+          <p class="text-sm text-ink-600">Resumen completo del sistema Rifas SYC</p>
+        </div>
+      </div>
+
+      <!-- EMPRESA + RESUMEN GENERAL -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+        <div class="card card-pad">
+          <h3 class="mb-3">🏢 Mi Empresa</h3>
+          <div style="display:flex; align-items:center; gap:16px;">
+            ${e.logo_path
+              ? `<img src="${escapeHtml(e.logo_path)}" style="width:60px; height:60px; border-radius:12px; object-fit:cover; border:2px solid var(--line);">`
+              : `<div style="width:60px; height:60px; border-radius:12px; background:linear-gradient(135deg,#D4A017,#F2C14E); display:flex; align-items:center; justify-content:center; font-size:28px;">🎲</div>`
+            }
+            <div>
+              <p style="font-size:18px; font-weight:700; margin:0;">${escapeHtml(e.nombre_empresa || 'Sin configurar')}</p>
+              <p class="text-sm text-ink-600" style="margin:2px 0 0;">📱 ${escapeHtml(e.telefono || 'Sin teléfono')}</p>
+              <p class="text-sm text-ink-600" style="margin:2px 0 0;">🎨 ${escapeHtml(e.color_marca || '#D4A017')}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card card-pad">
+          <h3 class="mb-3">📈 Resumen General</h3>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div style="padding:12px; background:rgba(212,160,23,0.1); border-radius:10px; text-align:center;">
+              <p style="font-size:28px; font-weight:800; color:var(--gold-500); margin:0;">${d.totalRifas}</p>
+              <p class="text-xs text-ink-600" style="margin:4px 0 0;">Total Rifas</p>
+            </div>
+            <div style="padding:12px; background:rgba(34,197,94,0.1); border-radius:10px; text-align:center;">
+              <p style="font-size:28px; font-weight:800; color:#22c55e; margin:0;">${d.rifasActivas}</p>
+              <p class="text-xs text-ink-600" style="margin:4px 0 0;">Activas</p>
+            </div>
+            <div style="padding:12px; background:rgba(59,130,246,0.1); border-radius:10px; text-align:center;">
+              <p style="font-size:28px; font-weight:800; color:#3b82f6; margin:0;">${d.totalParticipantes}</p>
+              <p class="text-xs text-ink-600" style="margin:4px 0 0;">Participantes</p>
+            </div>
+            <div style="padding:12px; background:rgba(245,158,11,0.1); border-radius:10px; text-align:center;">
+              <p style="font-size:22px; font-weight:800; color:#f59e0b; margin:0;">${fmtCOP(d.recaudado)}</p>
+              <p class="text-xs text-ink-600" style="margin:4px 0 0;">Recaudado</p>
+            </div>
+          </div>
+          <div style="margin-top:12px; display:flex; gap:12px;">
+            <div style="flex:1; padding:8px; background:rgba(34,197,94,0.08); border-radius:8px; text-align:center;">
+              <span style="font-size:16px; font-weight:700; color:#22c55e;">${d.pagados}</span>
+              <span class="text-xs text-ink-600"> pagados</span>
+            </div>
+            <div style="flex:1; padding:8px; background:rgba(245,158,11,0.08); border-radius:8px; text-align:center;">
+              <span style="font-size:16px; font-weight:700; color:#f59e0b;">${d.pendientes}</span>
+              <span class="text-xs text-ink-600"> pendientes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIFAS -->
+      <div class="card card-pad mb-4">
+        <h3 class="mb-3">🎯 Rifas (${d.rifas.length})</h3>
+        ${d.rifas.length === 0
+          ? '<p class="text-sm text-ink-600">No hay rifas creadas aún.</p>'
+          : `<div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+              <thead>
+                <tr style="border-bottom:2px solid var(--line); text-align:left;">
+                  <th style="padding:10px 12px;">Nombre</th>
+                  <th style="padding:10px 12px;">Producto</th>
+                  <th style="padding:10px 12px;">Modalidad</th>
+                  <th style="padding:10px 12px;">Estado</th>
+                  <th style="padding:10px 12px;">Valor</th>
+                  <th style="padding:10px 12px;">Vendidos</th>
+                  <th style="padding:10px 12px;">Sorteo</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${d.rifas.map(r => {
+                  const total = r.max_participants || r.vendidos || 0;
+                  const pct = fmtPct(r.vendidos, total);
+                  const estadoCls = r.estado === 'activa' ? 'badge-pagado' : r.estado === 'sorteada' ? 'badge-borrador' : 'badge-cerrada';
+                  return `<tr style="border-bottom:1px solid var(--line); cursor:pointer;" onclick="window.location.hash='#/rifas/${r.id}/resumen'">
+                    <td style="padding:10px 12px; font-weight:600;">${escapeHtml(r.nombre)}</td>
+                    <td style="padding:10px 12px;">${escapeHtml(r.producto)}</td>
+                    <td style="padding:10px 12px;"><span class="text-xs">${escapeHtml(r.modalidad_boleta)}</span></td>
+                    <td style="padding:10px 12px;"><span class="badge ${estadoCls}">${r.estado}</span></td>
+                    <td style="padding:10px 12px;">${fmtCOP(r.valor_boleta)}</td>
+                    <td style="padding:10px 12px;">
+                      <span style="font-weight:600;">${r.vendidos || 0}</span><span class="text-ink-600">/${total}</span>
+                      <span class="text-xs text-ink-600"> (${pct}%)</span>
+                    </td>
+                    <td style="padding:10px 12px; font-size:12px;">${r.fecha_sorteo ? fmtFecha(r.fecha_sorteo) : '—'}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`
+        }
+      </div>
+
+      <!-- PARTICIPANTES RECIENTES -->
+      <div class="card card-pad mb-4">
+        <h3 class="mb-3">👥 Participantes Recientes</h3>
+        ${d.participantesRecientes.length === 0
+          ? '<p class="text-sm text-ink-600">No hay participantes registrados aún.</p>'
+          : `<div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+              <thead>
+                <tr style="border-bottom:2px solid var(--line); text-align:left;">
+                  <th style="padding:10px 12px;">Nombre</th>
+                  <th style="padding:10px 12px;">Cédula</th>
+                  <th style="padding:10px 12px;">Teléfono</th>
+                  <th style="padding:10px 12px;">Rifa</th>
+                  <th style="padding:10px 12px;">Pago</th>
+                  <th style="padding:10px 12px;">Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${d.participantesRecientes.map(p => {
+                  const pagoCls = p.estado_pago === 'pagado' ? 'badge-pagado' : 'badge-cerrada';
+                  return `<tr style="border-bottom:1px solid var(--line);">
+                    <td style="padding:10px 12px; font-weight:600;">${escapeHtml(p.nombre)}</td>
+                    <td style="padding:10px 12px; font-size:12px; font-family:monospace;">${escapeHtml(p.cedula || '—')}</td>
+                    <td style="padding:10px 12px; font-size:12px; font-family:monospace;">${escapeHtml(p.telefono || '—')}</td>
+                    <td style="padding:10px 12px; font-size:12px;">${escapeHtml(p.rifa_nombre)}</td>
+                    <td style="padding:10px 12px;"><span class="badge ${pagoCls}">${p.estado_pago}</span></td>
+                    <td style="padding:10px 12px; font-size:12px;">${fmtFecha(p.fecha_registro)}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`
+        }
+      </div>
+
+      <!-- USUARIOS + LOGS -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div class="card card-pad">
+          <h3 class="mb-3">👤 Usuarios (${d.usuarios.length})</h3>
+          ${d.usuarios.map(u => `
+            <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+              <div style="width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg,#D4A017,#F2C14E); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; color:#0B1229; flex-shrink:0;">${(u.nombre || u.usuario || '?')[0].toUpperCase()}</div>
+              <div style="min-width:0;">
+                <p style="font-weight:600; margin:0; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.nombre)}</p>
+                <p class="text-xs text-ink-600" style="margin:0;">${escapeHtml(u.usuario)} · ${escapeHtml(u.rol)}</p>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card card-pad">
+          <h3 class="mb-3">📋 Actividad Reciente</h3>
+          ${d.logsRecientes.length === 0
+            ? '<p class="text-sm text-ink-600">Sin actividad registrada.</p>'
+            : d.logsRecientes.map(l => `
+              <div style="padding:6px 0; border-bottom:1px solid var(--line);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-weight:600; font-size:13px;">${escapeHtml(l.accion)}</span>
+                  <span class="text-xs text-ink-600">${fmtFecha(l.fecha)}</span>
+                </div>
+                <p class="text-xs text-ink-600" style="margin:2px 0 0;">${escapeHtml(l.rifa_nombre || '')} ${escapeHtml(l.detalle || '')}</p>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${escapeHtml(err.message)}</p></div>`;
+  }
 }
 
 // ================================================================================
