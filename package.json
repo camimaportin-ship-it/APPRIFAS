@@ -1,0 +1,33 @@
+{
+  "name": "rifas-colombia-pro",
+  "version": "2.0.0",
+  "description": "RifasPRO - Sistema de rifas independiente: 2 modalidades de boleta, grilla de elección, generador de poster 1080x1080, balotera virtual animada y envío masivo de WhatsApp personalizado sin pagar API de Meta.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "server": "node server.js",
+    "client": "node -e \"console.log('Frontend servido por Express en http://localhost:3000 (offline-first, sin build step)')\" && node backend/watch-noop.js",
+    "dev": "concurrently -n SERVER,CLIENT -c blue,green \"npm run server\" \"npm run client\"",
+    "start": "node server.js",
+    "postinstall": "node -e \"console.log('[RifasPRO] Dependencias instaladas. Ejecuta: npm run server')\""
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.7",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "chart.js": "^4.5.1",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "qrcode": "^1.5.3",
+    "qrcode-terminal": "^0.12.0",
+    "web-push": "^3.6.7",
+    "whatsapp-web.js": "^1.34.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

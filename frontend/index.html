@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rifas Colombia PRO</title>
+<meta name="description" content="Vende, cobra y sortea rifas en menos de 5 minutos.">
+<meta name="theme-color" content="#0B1229">
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%230B1229%22/><text x=%2250%22 y=%2266%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22%23D4A017%22 font-family=%22sans-serif%22>R</text></svg>">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ===================== LOGIN SCREEN ===================== -->
+<div id="login-screen" style="display:none; position:fixed; inset:0; z-index:9999; background:linear-gradient(135deg,#0B1229 0%,#16213F 50%,#0C1330 100%); align-items:center; justify-content:center; font-family:Sora,system-ui,sans-serif;">
+  <div style="width:100%; max-width:400px; padding:20px;">
+    <!-- Logo -->
+    <div style="text-align:center; margin-bottom:36px;">
+      <div style="display:inline-flex; align-items:center; justify-content:center; width:80px; height:80px; border-radius:20px; background:linear-gradient(135deg,#D4A017,#F2C14E); box-shadow:0 8px 32px rgba(212,160,23,0.4); margin-bottom:16px;">
+        <span style="font-size:40px; font-weight:800; color:#0B1229;">R</span>
+      </div>
+      <h1 style="color:#fff; font-size:28px; font-weight:800; margin:0;">Rifas <span style="color:#F2C14E;">PRO</span></h1>
+      <p style="color:rgba(255,255,255,0.6); font-size:14px; margin:6px 0 0;">Panel de administración</p>
+    </div>
+
+    <!-- Formulario -->
+    <form id="login-form" style="background:rgba(255,255,255,0.06); backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:32px 28px;">
+      <div style="margin-bottom:20px;">
+        <label style="display:block; color:rgba(255,255,255,0.7); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Usuario</label>
+        <input id="login-usuario" type="text" placeholder="Ingresa tu usuario" required autocomplete="username"
+          style="width:100%; padding:14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box;"
+          onfocus="this.style.borderColor='#D4A017'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; color:rgba(255,255,255,0.7); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Contraseña</label>
+        <div style="position:relative;">
+          <input id="login-password" type="password" placeholder="Ingresa tu contraseña" required autocomplete="current-password"
+            style="width:100%; padding:14px 46px 14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box;"
+            onfocus="this.style.borderColor='#D4A017'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
+          <button type="button" id="login-toggle-pass" aria-label="Mostrar u ocultar contraseña"
+            style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:rgba(255,255,255,0.55); cursor:pointer; font-size:18px; padding:4px;">👁️</button>
+        </div>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; color:rgba(255,255,255,0.7); font-size:13px; margin-bottom:22px; cursor:pointer;">
+        <input type="checkbox" id="login-remember" style="width:16px; height:16px; accent-color:#D4A017;"> Recuérdame en este dispositivo
+      </label>
+      <button id="login-btn" type="submit"
+        style="width:100%; padding:16px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:12px; color:#0B1229; font-size:16px; font-weight:700; cursor:pointer; transition:transform 0.15s,box-shadow 0.15s; box-shadow:0 4px 20px rgba(212,160,23,0.3);"
+        onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'">
+        Iniciar Sesión
+      </button>
+      <div id="login-error" style="display:none; margin-top:16px; padding:12px 16px; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fca5a5; font-size:14px; text-align:center;"></div>
+    </form>
+
+    <p style="text-align:center; color:rgba(255,255,255,0.35); font-size:12px; margin-top:24px;">Rifas Colombia PRO v2.0</p>
+  </div>
+</div>
+
+<!-- ============================ APP SHELL ============================ -->
+<div class="app-shell" id="app-shell" style="display:none;">
+
+  <!-- ============================ SIDEBAR ============================ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar__brand">
+      <div class="sidebar__brand-mark">R</div>
+      <div>
+        <div class="sidebar__brand-text">Rifas <span style="color:var(--gold-400)">PRO</span></div>
+        <div class="sidebar__brand-sub" id="empresa-nombre-sidebar">Colombia</div>
+      </div>
+    </div>
+    <nav id="nav-links">
+      <div class="nav-sec">Gestión</div>
+      <a href="#/rifas" class="nav-link" data-route="rifas">📋 Mis Rifas</a>
+      <a href="#/rifas/nueva" class="nav-link" data-route="rifas/nueva">➕ Crear Rifa</a>
+      <a href="#/papelera" class="nav-link" data-route="papelera">🗑️ Papelera</a>
+      <a href="#/logs" class="nav-link" data-route="logs">📜 Registro de cambios</a>
+    <div class="nav-sec">Herramientas</div>
+    <a href="#/dashboard" class="nav-link" data-route="dashboard">📊 Dashboard</a>
+    <a href="#/pruebas" class="nav-link" data-route="pruebas">🧪 Probar Animaciones</a>
+    <div class="nav-sec">Marketing</div>
+    <a href="#/plantillas" class="nav-link" data-route="plantillas">💬 Plantillas WhatsApp</a>
+    <div class="nav-sec">Cuenta</div>
+      <a href="#/empresa" class="nav-link" data-route="empresa">🏢 Mi Empresa</a>
+      <a href="#" class="nav-link" onclick="abrirCambiarPassword(); return false;">🔑 Cambiar contraseña</a>
+    </nav>
+    <div class="sidebar__footer">
+      <div id="sidebar-user-info" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <span id="sidebar-username" style="color:rgba(255,255,255,0.7); font-size:13px;"></span>
+        <button onclick="logout()" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#fca5a5; padding:6px 12px; border-radius:8px; font-size:12px; cursor:pointer;">Cerrar sesión</button>
+      </div>
+      Decreto 2480 de 2005 · Modalidad promocional entre particulares. Cumpla normatividad Coljuegos.
+    </div>
+  </aside>
+
+  <!-- ============================ MAIN ============================ -->
+  <div class="main">
+    <div class="topbar">
+      <div class="flex items-center gap-3">
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-sidebar" style="display:none">☰</button>
+        <button class="btn btn-ghost btn-sm" id="btn-atras" title="Volver atrás" onclick="volverAtras()">←</button>
+        <h1 id="page-title">Mis Rifas</h1>
+      </div>
+      <div id="topbar-actions"></div>
+    </div>
+    <div class="content" id="view-container">
+      <!-- Las vistas se inyectan aquí desde app.js -->
+    </div>
+  </div>
+
+</div>
+
+<!-- Contenedores globales -->
+<div id="sidebar-backdrop"></div>
+<div id="modal-root"></div>
+<div id="toast-container"></div>
+
+<!-- Librerías locales (offline-first, sin CDN) -->
+<script src="/vendor/chart.umd.js"></script>
+<script src="/vendor/canvas-confetti.js"></script>
+
+<!-- Componentes y lógica -->
+<script src="/components/RuletaCanvas.js"></script>
+<script src="/components/GeneradorImagen.js"></script>
+<script src="/components/BaloteraCanvas.js"></script> 
+<script src="/components/Balotera4D.js"></script> 
+<script src="/components/LogicaSorteo.js"></script> 
+<script src="/app.js"></script>
+
+<script>
+// Registro del Service Worker para funcionamiento offline (PWA).
+// Solo se activa en contexto seguro (https o localhost): en redes locales
+// por http://IP el navegador lo omite automáticamente, evitando errores.
+if ('serviceWorker' in navigator && (window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+  });
+}
+</script>
+<!-- Modal: Cambiar contraseña -->
+<div id="modal-cambiar-pass" style="display:none; position:fixed; inset:0; z-index:80; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:20px;">
+  <div style="width:100%; max-width:420px; background:#16213F; border:1px solid #22315A; border-radius:18px; padding:28px 26px;">
+    <h3 style="color:#fff; font-size:20px; font-weight:800; margin-bottom:4px;">🔑 Cambiar contraseña</h3>
+    <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:20px;">Se cerrarán todas las sesiones activas al guardar.</p>
+    <div style="margin-bottom:14px;">
+      <label style="display:block; color:rgba(255,255,255,0.7); font-size:12px; font-weight:600; margin-bottom:6px;">Contraseña actual</label>
+      <input id="cp-actual" type="password" autocomplete="current-password"
+        style="width:100%; padding:12px 14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:15px; outline:none; box-sizing:border-box;">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="display:block; color:rgba(255,255,255,0.7); font-size:12px; font-weight:600; margin-bottom:6px;">Nueva contraseña (mín. 6)</label>
+      <input id="cp-nueva" type="password" autocomplete="new-password"
+        style="width:100%; padding:12px 14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:15px; outline:none; box-sizing:border-box;">
+    </div>
+    <div style="margin-bottom:18px;">
+      <label style="display:block; color:rgba(255,255,255,0.7); font-size:12px; font-weight:600; margin-bottom:6px;">Repetir nueva contraseña</label>
+      <input id="cp-repete" type="password" autocomplete="new-password"
+        style="width:100%; padding:12px 14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:15px; outline:none; box-sizing:border-box;">
+    </div>
+    <div id="cp-error" style="display:none; margin-bottom:14px; padding:10px 14px; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fca5a5; font-size:13px;"></div>
+    <div style="display:flex; gap:10px;">
+      <button onclick="cerrarCambiarPassword()" style="flex:1; padding:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:14px; font-weight:600; cursor:pointer;">Cancelar</button>
+      <button id="cp-guardar" onclick="guardarCambiarPassword()" style="flex:1; padding:12px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:10px; color:#0B1229; font-size:14px; font-weight:700; cursor:pointer;">Guardar</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

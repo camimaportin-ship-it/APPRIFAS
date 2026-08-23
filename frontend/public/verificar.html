@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verificar Sorteo — Rifas Colombia PRO</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0B1229; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 600px; width: 100%; padding: 24px; }
+    .card { background: #16213F; border: 1px solid #22315A; border-radius: 16px; padding: 32px; text-align: center; }
+    .logo { font-size: 32px; font-weight: 800; color: #D4A017; margin-bottom: 8px; }
+    .subtitle { color: #98A2B3; font-size: 14px; margin-bottom: 24px; }
+    .rifa-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .rifa-producto { color: #98A2B3; font-size: 14px; margin-bottom: 20px; }
+    .winner-box { background: rgba(212,160,23,.12); border: 2px solid #D4A017; border-radius: 12px; padding: 20px; margin: 20px 0; }
+    .winner-label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #D4A017; margin-bottom: 8px; }
+    .winner-numero { font-size: 36px; font-weight: 800; color: #D4A017; }
+    .winner-nombre { font-size: 16px; color: #fff; margin-top: 6px; }
+    .semilla-box { background: rgba(255,255,255,.06); border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 13px; color: #98A2B3; }
+    .semilla-box .mono { font-family: 'Consolas', monospace; color: #E8B923; font-weight: 600; }
+    .info { font-size: 13px; color: #98A2B3; line-height: 1.6; margin-top: 20px; text-align: left; }
+    .info strong { color: #D4A017; }
+    .loading { color: #98A2B3; font-size: 16px; }
+    .error { color: #DC2626; font-size: 16px; }
+    .pendiente { color: #98A2B3; font-size: 16px; }
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
+    .badge-sorteada { background: #FBF0D2; color: #946200; }
+    .badge-activa { background: #d1fae5; color: #059669; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card" id="content">
+      <div class="loading">Cargando información del sorteo...</div>
+    </div>
+  </div>
+  <script>
+    const pathParts = window.location.pathname.split('/');
+    const rifaId = pathParts[pathParts.length - 1];
+    if (!rifaId) { document.getElementById('content').innerHTML = '<div class="error">ID de rifa no proporcionado</div>'; }
+    else { cargarVerificacion(rifaId); }
+
+    async function cargarVerificacion(id) {
+      try {
+        const res = await fetch('/api/public/rifa/' + id);
+        if (!res.ok) throw new Error('Rifa no encontrada');
+        const data = await res.json();
+        const { rifa, ganadores, empresa } = data;
+        const g = ganadores.length ? ganadores[0] : null;
+        const html = `
+          <div class="logo">Rifas PRO</div>
+          <div class="subtitle">Sistema de verificación de sorteos</div>
+          <div class="rifa-name">${esc(rifa.nombre)}</div>
+          <div class="rifa-producto">${esc(rifa.producto || '')}</div>
+          <span class="badge badge-${rifa.estado}">${rifa.estado === 'sorteada' ? 'Sorteada' : 'Activa'}</span>
+          ${rifa.estado === 'sorteada' && g ? `
+            <div class="winner-box">
+              <div class="winner-label">🏆 Ganador</div>
+              <div class="winner-numero">${esc(g.numero)}</div>
+              <div class="winner-nombre">${esc(g.nombre || '')}</div>
+            </div>
+            <div class="semilla-box">
+              🔐 Semilla de verificación: <span class="mono">${esc(g.semilla)}</span>
+              <br>Modalidad: ${esc(g.modalidad)} · ${new Date(g.fecha).toLocaleString('es-CO')}
+            </div>
+          ` : rifa.estado === 'sorteada' ? `
+            <div class="pendiente">Esta rifa fue sorteada pero no se encontró información del ganador.</div>
+          ` : `
+            <div class="pendiente">Esta rifa aún no ha sido sorteada.</div>
+          `}
+          <div class="info">
+            <strong>¿Cómo funciona la transparencia?</strong><br>
+            1. El resultado del sorteo se determina con un algoritmo criptográficamente seguro.<br>
+            2. Se genera una <strong>semilla aleatoria</strong> única para cada sorteo.<br>
+            3. Tanto el resultado como la semilla se registran permanentemente en la base de datos.<br>
+            4. Puedes verificar la semilla comparándola con la que se muestra aquí.<br>
+            5. Los datos son inmutables: no pueden ser alterados después del sorteo.
+          </div>
+          ${empresa && empresa.nombre_empresa ? `<div style="margin-top:16px; font-size:12px; color:#98A2B3;">Organiza: ${esc(empresa.nombre_empresa)}</div>` : ''}
+        `;
+        document.getElementById('content').innerHTML = html;
+      } catch (e) {
+        document.getElementById('content').innerHTML = '<div class="error">⚠️ ' + esc(e.message) + '</div>';
+      }
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+  </script>
+</body>
+</html>
