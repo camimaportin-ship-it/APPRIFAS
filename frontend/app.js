@@ -3938,6 +3938,11 @@ async function initApp() {
     state.empresa = empresa;
     document.getElementById('empresa-nombre-sidebar').textContent = empresa.nombre_empresa || 'Colombia';
   } catch (e) {}
+  // Tooltip en nav-links: muestra texto completo al pasar el mouse
+  document.querySelectorAll('.nav-link').forEach(link => {
+    const span = link.querySelector('span');
+    if (span) link.title = span.textContent.trim();
+  });
   router();
   suscribirPush();
 }
