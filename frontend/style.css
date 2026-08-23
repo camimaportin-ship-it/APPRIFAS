@@ -837,3 +837,22 @@ table.tbl th{white-space:nowrap;}
   #sidebar-user-info span{text-align:center;}
   .sidebar-logout-btn{width:100%; text-align:center; padding:10px 12px;}
 }
+
+/* ---------- Changelog timeline ---------- */
+.changelog-timeline{position:relative; padding-left:28px;}
+.changelog-timeline::before{content:''; position:absolute; left:8px; top:0; bottom:0; width:2px; background:var(--line);}
+.changelog-version{position:relative; margin-bottom:32px;}
+.changelog-dot{position:absolute; left:-24px; top:4px; width:14px; height:14px; border-radius:50%; background:var(--gold-500); border:3px solid var(--paper); box-shadow:0 0 0 2px var(--gold-500);}
+.changelog-version:first-child .changelog-dot{background:var(--emerald-500); box-shadow:0 0 0 2px var(--emerald-500);}
+.changelog-header{display:flex; align-items:flex-start; gap:12px; margin-bottom:12px;}
+.changelog-body{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:18px;}
+.changelog-cat{margin-bottom:16px;}
+.changelog-cat:last-child{margin-bottom:0;}
+.changelog-cat h4{font-size:14px; color:var(--ink-900);}
+.changelog-cat ul{font-size:13px; color:var(--ink-700); line-height:1.6;}
+.changelog-cat li::marker{color:var(--gold-500);}
+@media(max-width:600px){
+  .changelog-timeline{padding-left:20px;}
+  .changelog-dot{left:-16px; width:12px; height:12px;}
+  .changelog-body{padding:14px;}
+}

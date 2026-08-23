@@ -365,6 +365,9 @@ async function router() {
     } else if (parts[0] === 'logs') {
       document.getElementById('page-title').textContent = 'Registro de cambios';
       await vistaLogs();
+    } else if (parts[0] === 'changelog') {
+      document.getElementById('page-title').textContent = 'Historial de versiones';
+      await renderChangelog(container);
     } else if (parts[0] === 'pruebas' && parts[1] === 'rifa' && parts[2]) {
       document.getElementById('page-title').textContent = 'Previsualizar Animación';
       await renderPruebaRifa(container, parts[2]);
@@ -3932,6 +3935,53 @@ async function renderPaginaPublica(id) {
 // ARRANQUE
 // ================================================================================
 // ------------------------------- INIT -----------------------------------------
+// ================================================================================
+// VISTA: CHANGELOG / HISTORIAL DE VERSIONES
+// ================================================================================
+
+async function renderChangelog(container) {
+  container.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>Cargando historial...</p></div>';
+  try {
+    const data = await api('/changelog');
+    const { versionActual, changelog } = data;
+
+    container.innerHTML = `
+      <div style="margin-bottom:24px;">
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <span class="badge badge-activa" style="font-size:14px; padding:6px 14px;">v${escapeHtml(versionActual)}</span>
+          <span class="text-sm text-ink-600">Versión actual</span>
+        </div>
+      </div>
+
+      <div class="changelog-timeline">
+        ${changelog.map(v => `
+          <div class="changelog-version">
+            <div class="changelog-header">
+              <div class="changelog-dot"></div>
+              <div>
+                <h3 style="margin:0;">v${escapeHtml(v.version)}</h3>
+                <span class="text-xs text-ink-600">${escapeHtml(v.fecha)}</span>
+              </div>
+            </div>
+            <div class="changelog-body">
+              ${v.categorias.map(cat => `
+                <div class="changelog-cat">
+                  <h4 style="margin:0 0 8px;">${cat.icono} ${escapeHtml(cat.nombre)}</h4>
+                  <ul style="margin:0; padding-left:18px;">
+                    ${cat.items.map(item => `<li style="margin-bottom:4px;">${escapeHtml(item)}</li>`).join('')}
+                  </ul>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
 async function initApp() {
   try {
     const empresa = await api('/empresa');

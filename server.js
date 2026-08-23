@@ -717,6 +717,80 @@ app.get('/api/empresa', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Changelog / historial de versiones
+app.get('/api/changelog', (req, res) => {
+  const changelog = [
+    {
+      version: '2.1.0', fecha: '23 de agosto de 2026',
+      categorias: [
+        { nombre: 'UI/UX — Responsive completo', icono: '📱', items: [
+          'CSS responsive con 4 breakpoints (860px, 600px, 520px, 400px)',
+          'Sidebar hamburger siempre visible: colapsa en desktop, off-canvas en móvil',
+          'Tablas con scroll horizontal en admin y sesiones',
+          'Formularios apilados en móvil',
+          'Botones con flex-wrap para evitar desbordamiento',
+          'Login screen responsive',
+          'Modales siempre dentro de pantalla',
+          'Touch targets mínimos de 44px en móvil',
+          'KPI grid, quick actions y rifas grid responsivos',
+          'Sidebar texto con ellipsis y tooltips'
+        ]},
+        { nombre: 'Backend — Auditoría de sorteos', icono: '🔍', items: [
+          'Tabla sorteos_auditoria con trazabilidad completa',
+          'Función registrarSorteoAuditoria() en los 3 endpoints de sorteo',
+          'API de auditoría por rifa y global (admin+)'
+        ]},
+        { nombre: 'Backend — Modalidad 50/50', icono: '💰', items: [
+          'Columnas modalidad_premio y porcentaje_organizador',
+          'Toggle en formulario de creación/edición',
+          'Display en resumen y reporte PDF'
+        ]},
+        { nombre: 'Frontend — Exportar PDF', icono: '📋', items: [
+          'Reporte completo: datos, ganadores, pagados, pendientes',
+          'Botón PDF en vista de detalle de rifa',
+          'Incluye info de modalidad 50/50'
+        ]},
+        { nombre: 'Frontend — CAPTCHA matemático', icono: '🧮', items: [
+          'CAPTCHA en login (+, -, ×)',
+          'Se regenera tras cada intento fallido',
+          'Animación shake en respuesta incorrecta'
+        ]},
+        { nombre: 'Backend — Video balotera', icono: '🎥', items: [
+          'BaloteraCanvas: métodos iniciarGrabacion() y detenerGrabacion()'
+        ]},
+        { nombre: 'Administración de usuarios', icono: '👥', items: [
+          'RBAC con jerarquía super_admin > admin > vendedor',
+          'CRUD completo de usuarios',
+          'Panel de sesiones activas',
+          'Limpieza automática de sesiones expiradas'
+        ]}
+      ]
+    },
+    {
+      version: '2.0.0', fecha: 'Versión inicial',
+      categorias: [
+        { nombre: 'Funcionalidades base', icono: '🎯', items: [
+          '6 modalidades de rifa (BOLETAS_NORMAL, CUATRO_OPORTUNIDADES, CHANCE_CON_SIMBOLO, CHANCE_3_GANADORES, CHANCE_INDIVIDUAL, OPORTUNIDADES_4D)',
+          'Venta de boletas al azar o a elección del cliente',
+          'Generador de posters con QR (1080×1080, historia y poster 2160×2160)',
+          'Balotera virtual animada (canvas)',
+          'Ruleta animada con grabación de video',
+          'Revancha para todas las modalidades',
+          'WhatsApp masivo personalizado',
+          'Notificaciones push y PWA instalable',
+          'Importación/exportación por Excel',
+          'Autenticación con roles',
+          'Base de datos SQLite con migraciones automáticas',
+          'Dashboard con estadísticas y gráficas',
+          'Plantillas de WhatsApp editables',
+          'Página pública de verificación con QR'
+        ]}
+      ]
+    }
+  ];
+  res.json({ versionActual: '2.1.0', changelog });
+});
+
 app.put('/api/empresa', upload.single('logo'), (req, res) => {
   try {
     const { nombre_empresa, telefono, color_marca } = req.body;

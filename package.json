@@ -1,6 +1,6 @@
 {
   "name": "rifas-colombia-pro",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "RifasPRO - Sistema de rifas independiente: 2 modalidades de boleta, grilla de elección, generador de poster 1080x1080, balotera virtual animada y envío masivo de WhatsApp personalizado sin pagar API de Meta.",
   "main": "server.js",
   "engines": {
