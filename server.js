@@ -644,6 +644,16 @@ function registrarLog(accion, entidad, rifaId, rifaNombre, detalle = '') {
     .run(accion, entidad, rifaId || null, rifaNombre || null, detalle);
 }
 
+// Registro de auditoría de sorteos — trazabilidad completa de cada sorteo ejecutado
+function registrarSorteoAuditoria(rifaId, rifaNombre, modalidad, ejecutadoPor, semilla, ganadores, datosCompletos) {
+  const crypto = require('crypto');
+  const hashInput = `${rifaId}-${semilla}-${JSON.stringify(ganadores)}-${Date.now()}`;
+  const hashResultado = crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 16);
+  db.prepare(`INSERT INTO sorteos_auditoria (rifa_id, rifa_nombre, modalidad, ejecutado_por, semilla, hash_resultado, ganadores, datos_completos)
+    VALUES (?,?,?,?,?,?,?,?)`)
+    .run(rifaId, rifaNombre, modalidad, ejecutadoPor, semilla, hashResultado, JSON.stringify(ganadores), JSON.stringify(datosCompletos));
+}
+
 // Libera automáticamente los números en estado "pendiente" que llevan más
 // horas de las configuradas en auto_liberar_horas sin haberse marcado como
 // pagados. Se llama antes de cada operación relevante para mantener todo
@@ -836,8 +846,9 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
       INSERT INTO rifas (nombre, valor_boleta, producto, descripcion, fecha_sorteo, hora_sorteo, imagen_producto,
         banner_empresa, cantidad_max_participantes, rango_min, rango_max, tipo_rifa, mensaje_whatsapp,
         estado, auto_liberar_horas, modalidad_boleta, modo_asignacion, simbolos, premio1_nombre,
-        premio2_nombre, premio3_nombre, premio4_nombre, cifras, revancha_permitida, n_oportunidades)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        premio2_nombre, premio3_nombre, premio4_nombre, cifras, revancha_permitida, n_oportunidades,
+        modalidad_premio, porcentaje_organizador)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       b.nombre, parseInt(b.valor_boleta, 10), b.producto, b.descripcion || '', b.fecha_sorteo,
       b.hora_sorteo || null, imagen_producto, banner_empresa, cantidad_max_participantes, rango_min, rango_max,
@@ -848,7 +859,8 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
       b.premio1_nombre || 'Premio 1',       b.premio2_nombre || 'Premio 2', b.premio3_nombre || 'Premio 3',
       b.premio4_nombre || 'Premio 4', normalizarCifras(b.cifras),
       b.revancha_permitida ? 1 : 0,
-      esMultiples ? nOport : null
+      esMultiples ? nOport : null,
+      b.modalidad_premio || 'completo', parseInt(b.porcentaje_organizador || 0, 10)
     );
 
     const rifaId = info.lastInsertRowid;
@@ -935,7 +947,7 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
   db.prepare(`UPDATE rifas SET nombre=?, valor_boleta=?, producto=?, descripcion=?, fecha_sorteo=?, hora_sorteo=?,
       imagen_producto=?, banner_empresa=?, tipo_rifa=?, mensaje_whatsapp=?, estado=?, auto_liberar_horas=?,
       modalidad_boleta=?, modo_asignacion=?, simbolos=?, premio1_nombre=?, premio2_nombre=?, premio3_nombre=?, premio4_nombre=?, cifras=?, revancha_permitida=?,
-      rango_min=?, rango_max=?, cantidad_max_participantes=?
+      rango_min=?, rango_max=?, cantidad_max_participantes=?, modalidad_premio=?, porcentaje_organizador=?
       WHERE id=?`).run(
     b.nombre ?? rifa.nombre, b.valor_boleta ?? rifa.valor_boleta, b.producto ?? rifa.producto,
     b.descripcion ?? rifa.descripcion, b.fecha_sorteo ?? rifa.fecha_sorteo, b.hora_sorteo ?? rifa.hora_sorteo,
@@ -953,6 +965,8 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
     b.rango_min ?? rifa.rango_min,
     b.rango_max ?? rifa.rango_max,
     b.cantidad_max_participantes ?? rifa.cantidad_max_participantes,
+    b.modalidad_premio ?? rifa.modalidad_premio ?? 'completo',
+    b.porcentaje_organizador ?? rifa.porcentaje_organizador ?? 0,
     req.params.id
   );
   if (b.estado && b.estado !== rifa.estado) registrarHistorial(req.params.id, 'cambio-estado', `${rifa.estado} -> ${b.estado}`);
@@ -985,8 +999,9 @@ app.post('/api/rifas/:id/clonar', (req, res) => {
     INSERT INTO rifas (nombre, valor_boleta, producto, descripcion, fecha_sorteo, hora_sorteo, imagen_producto,
       banner_empresa, cantidad_max_participantes, rango_min, rango_max, tipo_rifa, mensaje_whatsapp,
       estado, auto_liberar_horas, modalidad_boleta, modo_asignacion, grupos_numeros, simbolos,
-      premio1_nombre, premio2_nombre, premio3_nombre, premio4_nombre, cifras, revancha_permitida, n_oportunidades)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'borrador',?,?,?,?,?,?,?,?,?,?,?,?)
+      premio1_nombre, premio2_nombre, premio3_nombre, premio4_nombre, cifras, revancha_permitida, n_oportunidades,
+      modalidad_premio, porcentaje_organizador)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'borrador',?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     `${rifa.nombre} (copia)`, rifa.valor_boleta, rifa.producto, rifa.descripcion, rifa.fecha_sorteo,
     rifa.hora_sorteo, rifa.imagen_producto, rifa.banner_empresa, rifa.cantidad_max_participantes, rifa.rango_min,
@@ -995,7 +1010,8 @@ app.post('/api/rifas/:id/clonar', (req, res) => {
     rifa.simbolos, rifa.premio1_nombre || 'Premio 1', rifa.premio2_nombre || 'Premio 2',
     rifa.premio3_nombre || 'Premio 3', rifa.premio4_nombre || 'Premio 4', normalizarCifras(rifa.cifras),
     rifa.revancha_permitida || 0,
-    rifa.n_oportunidades || null
+    rifa.n_oportunidades || null,
+    rifa.modalidad_premio || 'completo', rifa.porcentaje_organizador || 0
   );
   const nuevaId = info.lastInsertRowid;
 
@@ -1561,6 +1577,7 @@ app.post('/api/rifas/:id/sortear', (req, res) => {
   registrarHistorial(rifaId, 'sorteo', `Modalidad ${modalidad}, semilla ${semilla}, ganadores: ${ganadores.map(g => g.numero).join(', ')}`);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
   const nombresGanadores = ganadores.map(g => g.nombre).join(', ');
+  registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', modalidad, req.session?.usuario || 'sistema', semilla, ganadores, { modalidad, semilla, ganadores: ganadores.map(g => ({ numero: g.numero, nombre: g.nombre })) });
   enviarPush('Sorteo realizado', `${rifaInfo?.nombre}: ganador(es) ${nombresGanadores}`, { rifaId, tipo: 'sorteo' });
   res.json({ semilla, modalidad, ganadores });
 });
@@ -1571,6 +1588,20 @@ app.get('/api/rifas/:id/ganadores', (req, res) => {
 
 app.get('/api/rifas/:id/historial', (req, res) => {
   res.json(db.prepare('SELECT * FROM historial WHERE rifa_id = ? ORDER BY fecha DESC').all(req.params.id));
+});
+
+// Auditoría de sorteos de una rifa (admin+)
+app.get('/api/rifas/:id/auditoria-sorteos', requireRole('admin'), (req, res) => {
+  res.json(db.prepare('SELECT * FROM sorteos_auditoria WHERE rifa_id = ? ORDER BY fecha DESC').all(req.params.id));
+});
+
+// Auditoría global de sorteos (admin+)
+app.get('/api/auditoria-sorteos', requireRole('admin'), (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const rows = db.prepare('SELECT * FROM sorteos_auditoria ORDER BY fecha DESC LIMIT ? OFFSET ?').all(limit, offset);
+  const total = db.prepare('SELECT COUNT(*) c FROM sorteos_auditoria').get().c;
+  res.json({ rows, total, limit, offset });
 });
 
 // ------------------- CHANCE CON SÍMBOLO: SORTEO + REVANCHA -------------------
@@ -1640,6 +1671,8 @@ app.post('/api/rifas/:id/chance-sorteo', (req, res) => {
   const pagados = db.prepare("SELECT COUNT(*) c FROM participantes WHERE rifa_id=? AND estado_pago='pagado'").get(rifaId).c;
   registrarHistorial(rifaId, esRevancha ? 'sorteo-chance-revancha' : 'sorteo-chance',
     `Chance ${numeroStr} ${simboloGanador}${esRevancha ? ' (revancha de ' + premiosSol.join(',') + ')' : ''}, semilla ${semilla}`);
+  const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
+  registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', esRevancha ? 'chance-revancha' : 'chance', req.session?.usuario || 'sistema', semilla, resultados, { cifras: numeroStr, simbolo: simboloGanador, premios: resultados, revancha: esRevancha });
 
   res.json({
     semilla, cifras, nCifras: cifrasN, numero: numeroStr, simbolo: simboloGanador,
@@ -1729,6 +1762,8 @@ app.post('/api/rifas/:id/balotera', (req, res) => {
     .run(rifaId, numeroGanador, ganador.id, ganador.nombre, 'balotera', semilla);
   db.prepare("UPDATE rifas SET estado='sorteada' WHERE id=?").run(rifaId);
   registrarHistorial(rifaId, 'sorteo-balotera', `Ganador ${fmtNumero(rifa, numeroGanador)} (${ganador.nombre}), semilla ${semilla}, modo: ${modoParticipantes}`);
+  const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
+  registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', 'balotera', req.session?.usuario || 'sistema', semilla, [{ numero: numeroGanador, nombre: ganador.nombre }], { numero: numeroGanador, cifras, modo: modoParticipantes });
 
   res.json({
     semilla,

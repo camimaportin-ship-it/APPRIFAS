@@ -428,6 +428,30 @@ class BaloteraCanvas {
   }
 
   detener() { if (this._raf) cancelAnimationFrame(this._raf); }
+
+  iniciarGrabacion() {
+    if (!this.canvas.captureStream) return false;
+    if (this._mediaRecorder && this._mediaRecorder.state === 'recording') return false;
+    const stream = this.canvas.captureStream(30);
+    this._chunks = [];
+    try { this._mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' }); }
+    catch (e) { this._mediaRecorder = new MediaRecorder(stream); }
+    this._mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) this._chunks.push(e.data); };
+    this._mediaRecorder.start();
+    return true;
+  }
+
+  detenerGrabacion() {
+    return new Promise((resolve) => {
+      if (!this._mediaRecorder || this._mediaRecorder.state !== 'recording') return resolve(null);
+      this._mediaRecorder.onstop = () => {
+        const blob = new Blob(this._chunks, { type: 'video/webm' });
+        this.videoBlobUrl = URL.createObjectURL(blob);
+        resolve(this.videoBlobUrl);
+      };
+      this._mediaRecorder.stop();
+    });
+  }
 }
 
 function shuffle(arr) {

@@ -317,9 +317,10 @@ table.tbl tr:hover td{background:var(--line-soft);}
 /* ---------- Lista de números disponibles (resumen) ---------- */
 .disponibles-lista{max-height:180px; overflow-y:auto;}
 
-/* ---------- Responsive sidebar ---------- */
+/* ---------- Responsive sidebar (base: oculto en móvil) ---------- */
 @media(max-width:860px){
-  .sidebar{position:fixed; left:-240px; z-index:50; transition:left .2s ease; box-shadow:var(--shadow-lg);}
+  #btn-toggle-sidebar{display:inline-flex!important;}
+  .sidebar{position:fixed; left:-260px; width:260px; z-index:50; transition:left .25s ease; box-shadow:var(--shadow-lg);}
   .sidebar.open{left:0;}
   .content{padding:18px;}
   .grid-3{grid-template-columns:1fr 1fr;}
@@ -633,4 +634,182 @@ table.tbl tr:hover td{background:var(--gold-100);}
   40%{transform:translateX(8px);}
   60%{transform:translateX(-6px);}
   80%{transform:translateX(6px);}
+}
+
+/* =============================================================================
+   RESPONSIVE COMPLETO — capa final que garantiza 100% mobile-first
+   ============================================================================= */
+
+/* ---- Bloque global: evitar overflow horizontal ---- */
+html{overflow-x:hidden;}
+body{overflow-x:hidden;}
+
+/* ---- Contenedor de contenido: siempre con max-width y padding responsivo ---- */
+.content{padding:28px; max-width:1200px; margin:0 auto; width:100%; box-sizing:border-box;}
+
+/* ---- Topbar responsive ---- */
+.topbar{padding:14px 20px; gap:10px;}
+.topbar h1{font-size:18px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+/* ---- Tablas: scroll horizontal obligatorio en contenedor ---- */
+.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; border-radius:var(--radius-lg); border:1px solid var(--line);}
+.table-wrap table{min-width:600px;}
+table.tbl{width:100%; border-collapse:collapse; font-size:14px;}
+table.tbl th{white-space:nowrap;}
+
+/* ---- Botones: evitar desbordamiento ---- */
+.btn-group{display:flex; flex-wrap:wrap; gap:8px;}
+.btn-group .btn{flex:1 1 auto; min-width:0; justify-content:center;}
+.btn{white-space:nowrap; flex-shrink:0;}
+.btn-block{width:100%; justify-content:center;}
+
+/* ---- Formularios: campos apilados en móvil ---- */
+.field{margin-bottom:14px;}
+.field .input, .field select.input, .field textarea.input{box-sizing:border-box;}
+
+/* ---- KPI grid responsivo ---- */
+.kpi-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px;}
+
+/* ---- Rifas grid responsivo ---- */
+.rifas-grid{grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:16px;}
+
+/* ---- Quick actions responsivo ---- */
+.quick-actions{grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;}
+
+/* ---- Modal: siempre dentro de pantalla ---- */
+.modal-backdrop{padding:12px; align-items:flex-end;}
+@media(min-width:600px){.modal-backdrop{align-items:center;}}
+.modal{max-width:560px; width:100%; max-height:85vh; margin:0 auto;}
+
+/* ---- Login screen responsive ---- */
+@media(max-width:480px){
+  #login-screen > div{padding:16px;}
+  #login-screen h1{font-size:24px;}
+  #login-form{padding:24px 20px;}
+}
+
+/* =============================================================================
+   RESPONSIVE: TABLET (<= 860px)
+   ============================================================================= */
+@media(max-width:860px){
+  .topbar{padding:12px 16px;}
+  .topbar h1{font-size:17px;}
+  .content{padding:16px;}
+  .grid-2{grid-template-columns:1fr;}
+  .grid-3{grid-template-columns:1fr 1fr;}
+  .kpi-grid{grid-template-columns:repeat(2, 1fr);}
+  .rifas-grid{grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:14px;}
+  .quick-actions{grid-template-columns:repeat(2, 1fr);}
+  .nav-pager .btn{min-width:100px; padding:8px 12px; font-size:13px;}
+  .anim-layout{flex-direction:column; align-items:center;}
+  .anim-lista{flex:0 0 auto; max-height:none; width:100%;}
+  .rifas-toolbar{flex-direction:column; align-items:stretch;}
+  .rifas-toolbar__filtros{flex-direction:column;}
+  .rifas-search, .rifas-filter{max-width:100%; min-width:0;}
+  .rifas-toolbar__vistas{justify-content:flex-end;}
+  .rifas-list-item{flex-wrap:wrap; gap:10px;}
+  .rifas-list-item__stats{width:100%; flex-direction:row; justify-content:space-between; align-items:center;}
+  .chance-tambos-row{gap:6px;}
+  .tambo-viewport{width:54px; height:66px;}
+  .tambo-celda{height:58px; font-size:28px;}
+  .popup-cifra{width:46px; height:56px; font-size:32px;}
+  .popup-cifra-grande{min-width:100px; padding:0 14px;}
+  .popup-simbolo{width:54px; height:54px; font-size:32px;}
+  .popup-premios{grid-template-columns:repeat(2, 1fr);}
+  .popup-actions .btn{min-width:120px;}
+  .anim-canvas{max-width:100%; overflow:hidden;}
+  .anim-canvas canvas{max-width:100%; height:auto;}
+  .balotera-canvas{max-width:100%;}
+}
+
+/* =============================================================================
+   RESPONSIVE: MÓVIL (<= 600px)
+   ============================================================================= */
+@media(max-width:600px){
+  .content{padding:14px;}
+  .topbar{padding:10px 14px;}
+  .topbar h1{font-size:16px;}
+  .grid-2, .grid-3{grid-template-columns:1fr;}
+  .kpi-grid{grid-template-columns:1fr 1fr; gap:10px;}
+  .kpi{padding:14px;}
+  .kpi .kpi-value{font-size:22px;}
+  .rifas-grid{grid-template-columns:1fr;}
+  .quick-actions{grid-template-columns:1fr;}
+  .qa{padding:12px;}
+  .qa-icon{width:38px; height:38px; font-size:20px;}
+  .card-pad{padding:16px;}
+  .btn{padding:10px 14px; font-size:13px;}
+  .btn-sm{padding:6px 10px; font-size:12px;}
+  .modal__header{padding:16px 18px;}
+  .modal__body{padding:18px;}
+  .modal__header h3{font-size:16px;}
+  table.tbl{font-size:13px;}
+  table.tbl th, table.tbl td{padding:8px 10px;}
+  .tabs{gap:0; overflow-x:auto; -webkit-overflow-scrolling:touch;}
+  .tab{padding:8px 12px; font-size:13px;}
+  .chance-tambos-row{gap:4px;}
+  .tambo-viewport{width:46px; height:56px;}
+  .tambo-celda{height:48px; font-size:24px;}
+  .tambo-simbolo .tambo-viewport{width:54px;}
+  .tambo-simbolo .tambo-celda{font-size:28px;}
+  .popup-cifra{width:40px; height:48px; font-size:28px; border-radius:8px;}
+  .popup-cifra-grande{min-width:80px; padding:0 10px;}
+  .popup-simbolo{width:48px; height:48px; font-size:28px;}
+  .popup-premios{grid-template-columns:1fr; gap:8px;}
+  .popup-winner{flex-direction:column; text-align:center;}
+  .popup-actions{flex-direction:column;}
+  .popup-actions .btn{min-width:100%; width:100%;}
+  .grilla-numeros{grid-template-columns:repeat(5, 1fr); gap:4px;}
+  .grilla-celda{font-size:11px; border-radius:6px;}
+  .grilla-grupos{grid-template-columns:repeat(auto-fill, minmax(70px, 1fr)); gap:4px;}
+  .grupo-celda{padding:6px 4px;}
+  .grupo-nums{font-size:11px;}
+  .seg-control{flex-direction:column;}
+  .seg-btn{flex:1 1 auto;}
+  .anim-layout{gap:12px;}
+  .anim-lista{padding:10px 12px; font-size:13px;}
+  .anim-lista-ol li{font-size:12px; padding:4px 6px;}
+  .rifas-toolbar{padding:10px 12px; gap:8px;}
+  .rifas-search{min-width:0;}
+  .wa-lista{max-height:180px;}
+  .empty-state{padding:40px 16px;}
+  .empty-state .icon{font-size:32px;}
+  .btn-group{flex-wrap:wrap;}
+  #admin-sesiones-panel table{min-width:480px;}
+}
+
+/* =============================================================================
+   RESPONSIVE: MUY PEQUEÑO (<= 400px)
+   ============================================================================= */
+@media(max-width:400px){
+  .content{padding:10px;}
+  .topbar{padding:8px 10px;}
+  .topbar h1{font-size:14px;}
+  .kpi-grid{grid-template-columns:1fr;}
+  .kpi .kpi-value{font-size:20px;}
+  .card-pad{padding:12px;}
+  .btn{padding:9px 12px; font-size:12px;}
+  .modal{border-radius:14px;}
+  .modal__header{padding:14px 16px;}
+  .modal__body{padding:14px 16px;}
+  .grilla-numeros{grid-template-columns:repeat(5, 1fr); gap:3px;}
+  .grilla-celda{font-size:10px;}
+  .popup-cifra{width:36px; height:44px; font-size:24px;}
+  .popup-actions .btn{font-size:12px; padding:8px 10px;}
+  #login-screen h1{font-size:20px;}
+}
+
+/* ---- Touch: min 44px hit targets en móvil ---- */
+@media(max-width:860px){
+  .btn{min-height:44px;}
+  .nav-link{min-height:44px; padding:12px;}
+  .tab{min-height:44px;}
+  .grilla-celda{min-width:32px; min-height:32px;}
+  .grupo-celda{min-width:44px;}
+}
+
+/* ---- Sidebar footer: responsive ---- */
+@media(max-width:860px){
+  .sidebar__footer{padding:14px 16px; font-size:10px;}
+  #sidebar-user-info{flex-direction:column; gap:8px; align-items:flex-start;}
 }

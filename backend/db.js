@@ -345,10 +345,31 @@ CREATE INDEX IF NOT EXISTS idx_logs_fecha ON logs(fecha);
 CREATE INDEX IF NOT EXISTS idx_logs_rifa ON logs(rifa_id);
 `);
 
+  db.exec(`
+CREATE TABLE IF NOT EXISTS sorteos_auditoria (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rifa_id INTEGER NOT NULL,
+  rifa_nombre TEXT,
+  modalidad TEXT NOT NULL,
+  ejecutado_por TEXT NOT NULL,
+  fecha TEXT DEFAULT (datetime('now','localtime')),
+  semilla TEXT,
+  hash_resultado TEXT,
+  ganadores TEXT,
+  datos_completos TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sorteos_aud_rifa ON sorteos_auditoria(rifa_id);
+CREATE INDEX IF NOT EXISTS idx_sorteos_aud_fecha ON sorteos_auditoria(fecha);
+`);
+
   if (!tieneColumna(db, 'usuarios', 'usuario'))
     db.exec(`ALTER TABLE usuarios ADD COLUMN usuario TEXT`);
   if (!tieneColumna(db, 'usuarios', 'password_hash'))
     db.exec(`ALTER TABLE usuarios ADD COLUMN password_hash TEXT`);
+  if (!tieneColumna(db, 'rifas', 'modalidad_premio'))
+    db.exec(`ALTER TABLE rifas ADD COLUMN modalidad_premio TEXT DEFAULT 'completo'`);
+  if (!tieneColumna(db, 'rifas', 'porcentaje_organizador'))
+    db.exec(`ALTER TABLE rifas ADD COLUMN porcentaje_organizador INTEGER DEFAULT 0`);
 
   const admins = [
     { usuario: 'hans4269', nombre: 'Hans Admin', password: 'Rifas01234' },

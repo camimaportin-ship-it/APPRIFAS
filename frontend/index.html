@@ -16,8 +16,8 @@
 <body>
 
 <!-- ===================== LOGIN SCREEN ===================== -->
-<div id="login-screen" style="display:none; position:fixed; inset:0; z-index:9999; background:linear-gradient(135deg,#0B1229 0%,#16213F 50%,#0C1330 100%); align-items:center; justify-content:center; font-family:Sora,system-ui,sans-serif;">
-  <div style="width:100%; max-width:400px; padding:20px;">
+<div id="login-screen" style="display:none; position:fixed; inset:0; z-index:9999; background:linear-gradient(135deg,#0B1229 0%,#16213F 50%,#0C1330 100%); align-items:center; justify-content:center; font-family:Sora,system-ui,sans-serif; overflow-y:auto;">
+  <div style="width:100%; max-width:400px; padding:20px; box-sizing:border-box;">
     <!-- Logo -->
     <div style="text-align:center; margin-bottom:36px;">
       <div style="display:inline-flex; align-items:center; justify-content:center; width:80px; height:80px; border-radius:20px; background:linear-gradient(135deg,#D4A017,#F2C14E); box-shadow:0 8px 32px rgba(212,160,23,0.4); margin-bottom:16px;">
@@ -32,24 +32,32 @@
       <div style="margin-bottom:20px;">
         <label style="display:block; color:rgba(255,255,255,0.7); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Usuario</label>
         <input id="login-usuario" type="text" placeholder="Ingresa tu usuario" required autocomplete="username"
-          style="width:100%; padding:14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box;"
+          style="width:100%; padding:14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box; max-width:100%;"
           onfocus="this.style.borderColor='#D4A017'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
       </div>
       <div style="margin-bottom:14px;">
         <label style="display:block; color:rgba(255,255,255,0.7); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Contraseña</label>
         <div style="position:relative;">
           <input id="login-password" type="password" placeholder="Ingresa tu contraseña" required autocomplete="current-password"
-            style="width:100%; padding:14px 46px 14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box;"
+            style="width:100%; padding:14px 46px 14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box; max-width:100%;"
             onfocus="this.style.borderColor='#D4A017'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
           <button type="button" id="login-toggle-pass" aria-label="Mostrar u ocultar contraseña"
             style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:rgba(255,255,255,0.55); cursor:pointer; font-size:18px; padding:4px;">👁️</button>
         </div>
       </div>
-      <label style="display:flex; align-items:center; gap:8px; color:rgba(255,255,255,0.7); font-size:13px; margin-bottom:22px; cursor:pointer;">
+      <label style="display:flex; align-items:center; gap:8px; color:rgba(255,255,255,0.7); font-size:13px; margin-bottom:14px; cursor:pointer;">
         <input type="checkbox" id="login-remember" style="width:16px; height:16px; accent-color:#D4A017;"> Recuérdame en este dispositivo
       </label>
+      <div id="login-captcha-box" style="margin-bottom:18px; padding:12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px;">
+        <label style="display:block; color:rgba(255,255,255,0.7); font-size:12px; font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">Verificación</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span id="login-captcha-pregunta" style="color:#fff; font-size:15px; font-weight:700; flex:1;"></span>
+          <input id="login-captcha-respuesta" type="number" placeholder="?" required
+            style="width:70px; padding:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:8px; color:#fff; font-size:16px; text-align:center; outline:none; box-sizing:border-box;">
+        </div>
+      </div>
       <button id="login-btn" type="submit"
-        style="width:100%; padding:16px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:12px; color:#0B1229; font-size:16px; font-weight:700; cursor:pointer; transition:transform 0.15s,box-shadow 0.15s; box-shadow:0 4px 20px rgba(212,160,23,0.3);"
+        style="width:100%; padding:16px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:12px; color:#0B1229; font-size:16px; font-weight:700; cursor:pointer; transition:transform 0.15s,box-shadow 0.15s; box-shadow:0 4px 20px rgba(212,160,23,0.3); box-sizing:border-box;"
         onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'">
         Iniciar Sesión
       </button>
@@ -104,7 +112,7 @@
   <div class="main">
     <div class="topbar">
       <div class="flex items-center gap-3">
-        <button class="btn btn-ghost btn-sm" id="btn-toggle-sidebar" style="display:none">☰</button>
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-sidebar">☰</button>
         <button class="btn btn-ghost btn-sm" id="btn-atras" title="Volver atrás" onclick="volverAtras()">←</button>
         <h1 id="page-title">Mis Rifas</h1>
       </div>
@@ -145,8 +153,8 @@ if ('serviceWorker' in navigator && (window.isSecureContext || location.hostname
 }
 </script>
 <!-- Modal: Cambiar contraseña -->
-<div id="modal-cambiar-pass" style="display:none; position:fixed; inset:0; z-index:80; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:20px;">
-  <div style="width:100%; max-width:420px; background:#16213F; border:1px solid #22315A; border-radius:18px; padding:28px 26px;">
+<div id="modal-cambiar-pass" style="display:none; position:fixed; inset:0; z-index:80; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
+  <div style="width:100%; max-width:420px; background:#16213F; border:1px solid #22315A; border-radius:18px; padding:28px 26px; box-sizing:border-box;">
     <h3 style="color:#fff; font-size:20px; font-weight:800; margin-bottom:4px;">🔑 Cambiar contraseña</h3>
     <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:20px;">Se cerrarán todas las sesiones activas al guardar.</p>
     <div style="margin-bottom:14px;">

@@ -8,8 +8,20 @@
 
 // Modalidades de chance (las 3 primeras comparten la lógica de boletas_chance)
 function modoEsChance(rifa) {
-  return !!rifa && ['CHANCE_CON_SIMBOLO', 'CHANCE_3_GANADORES', 'CHANCE_INDIVIDUAL'].includes(rifa.modalidad_boleta);
+  return ['CHANCE_CON_SIMBOLO', 'CHANCE_INDIVIDUAL', 'CHANCE_3_GANADORES'].includes(rifa.modalidad_boleta);
 }
+
+// CAPTCHA matemático simple (sin dependencias, offline-first)
+function generarCaptcha() {
+  const ops = ['+', '-', '×'];
+  const op = ops[Math.floor(Math.random() * ops.length)];
+  let a, b, respuesta;
+  if (op === '+') { a = Math.floor(Math.random() * 20) + 1; b = Math.floor(Math.random() * 20) + 1; respuesta = a + b; }
+  else if (op === '-') { a = Math.floor(Math.random() * 20) + 10; b = Math.floor(Math.random() * 15) + 1; respuesta = a - b; }
+  else { a = Math.floor(Math.random() * 10) + 1; b = Math.floor(Math.random() * 10) + 1; respuesta = a * b; }
+  return { pregunta: `¿Cuánto es ${a} ${op} ${b}?`, respuesta };
+}
+window._captchaActual = null;
 function esChance4D(rifa) {
   return !!rifa && ['CHANCE_3_GANADORES', 'CHANCE_INDIVIDUAL'].includes(rifa.modalidad_boleta) && Number(rifa.cifras || 4) >= 4;
 }
@@ -58,6 +70,12 @@ function mostrarLogin() {
   const el = document.getElementById('login-screen');
   el.style.display = 'flex';
   document.getElementById('app-shell').style.display = 'none';
+  // Generar CAPTCHA al mostrar login
+  window._captchaActual = generarCaptcha();
+  const preguntaEl = document.getElementById('login-captcha-pregunta');
+  const respuestaEl = document.getElementById('login-captcha-respuesta');
+  if (preguntaEl) preguntaEl.textContent = window._captchaActual.pregunta;
+  if (respuestaEl) respuestaEl.value = '';
 }
 
 function mostrarApp() {
@@ -88,6 +106,24 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const btn = document.getElementById('login-btn');
   const errDiv = document.getElementById('login-error');
   errDiv.style.display = 'none';
+
+  // Validar CAPTCHA
+  const captchaInput = document.getElementById('login-captcha-respuesta');
+  if (captchaInput && window._captchaActual) {
+    const respuesta = parseInt(captchaInput.value, 10);
+    if (respuesta !== window._captchaActual.respuesta) {
+      errDiv.textContent = '❌ Respuesta incorrecta. Intenta de nuevo.';
+      errDiv.style.display = 'block';
+      captchaInput.classList.add('shake');
+      setTimeout(() => captchaInput.classList.remove('shake'), 400);
+      window._captchaActual = generarCaptcha();
+      document.getElementById('login-captcha-pregunta').textContent = window._captchaActual.pregunta;
+      captchaInput.value = '';
+      captchaInput.focus();
+      return;
+    }
+  }
+
   btn.disabled = true;
   btn.textContent = 'Ingresando...';
   let res, data;
@@ -820,6 +856,14 @@ function renderFormularioRifa(rifa) {
     </div>
 
     <div class="field">
+      <label class="check-row mb-1"><input type="checkbox" id="chk-50-50" ${(v.modalidad_premio === '50_50') ? 'checked' : ''}> <span>Modalidad <strong>50/50</strong> — el organizador se queda con el 50% de la recaudación</span></label>
+      <div id="campo-50-50" style="display:${(v.modalidad_premio === '50_50') ? '' : 'none'};">
+        <input class="input" name="porcentaje_organizador" type="number" min="10" max="90" value="${v.porcentaje_organizador || 50}">
+        <span class="hint">Porcentaje que se queda el organizador (el resto es el premio del ganador).</span>
+      </div>
+    </div>
+
+    <div class="field">
       <label>Mensaje de WhatsApp para promocionar (opcional)</label>
       <textarea class="input" name="mensaje_whatsapp" rows="2" placeholder="¡Participa en nuestra rifa! 🎉">${escapeHtml(v.mensaje_whatsapp || '')}</textarea>
     </div>
@@ -981,6 +1025,22 @@ function bindFormularioRifa(rifa) {
     chkAuto.addEventListener('change', aplicarAuto);
   }
 
+  // Toggle modalidad 50/50
+  const chk5050 = document.getElementById('chk-50-50');
+  const campo5050 = document.getElementById('campo-50-50');
+  const input5050 = form.querySelector('input[name=porcentaje_organizador]');
+  if (chk5050 && campo5050 && input5050) {
+    const aplicar5050 = () => {
+      const on = chk5050.checked;
+      campo5050.style.display = on ? '' : 'none';
+      input5050.disabled = !on;
+      if (!on) input5050.value = '0';
+      else if (!Number(input5050.value)) input5050.value = '50';
+    };
+    aplicar5050();
+    chk5050.addEventListener('change', aplicar5050);
+  }
+
   // La hora del sorteo solo es obligatoria para rifas virtuales (Ruleta en vivo)
   const campoHora = document.getElementById('campo-hora-sorteo');
   const selTipo = form.querySelector('#sel-tipo-rifa');
@@ -1041,6 +1101,14 @@ function bindFormularioRifa(rifa) {
     }
     // Si la auto-liberación está deshabilitada, forzar 0 (el input deshabilitado no viaja en FormData)
     if (chkAuto && !chkAuto.checked) fd.set('auto_liberar_horas', '0');
+    // Modalidad 50/50
+    if (chk5050 && chk5050.checked) {
+      fd.set('modalidad_premio', '50_50');
+      fd.set('porcentaje_organizador', input5050 ? input5050.value : '50');
+    } else {
+      fd.set('modalidad_premio', 'completo');
+      fd.set('porcentaje_organizador', '0');
+    }
     try {
       const guardado = rifa
         ? await apiForm('/rifas/' + rifa.id, fd, 'PUT')
@@ -1180,6 +1248,7 @@ async function renderResumen(rifa, d) {
         <p class="text-sm text-ink-600">${escapeHtml(rifa.descripcion || 'Sin descripción')}</p>
         <p class="text-sm mt-2">📅 Sorteo: <strong>${fmtFecha(rifa.fecha_sorteo)}${rifa.hora_sorteo ? ' · ' + rifa.hora_sorteo + 'h' : ''}</strong></p>
         <p class="text-sm">🎟️ Boleta: <strong>${fmtCOP(rifa.valor_boleta)}</strong></p>
+        ${rifa.modalidad_premio === '50_50' ? `<p class="text-sm" style="color:var(--gold-600);">💰 Modalidad 50/50 — Organizador: ${rifa.porcentaje_organizador || 50}% · Ganador: ${100 - (rifa.porcentaje_organizador || 50)}%</p>` : ''}
         ${rifa.estado === 'activa' || rifa.estado === 'cerrada' ? `
         <button class="btn btn-outline btn-sm mt-3" onclick='modalAplazarRifa(${safeAttr({ id: rifa.id, fecha_sorteo: rifa.fecha_sorteo, hora_sorteo: rifa.hora_sorteo || '', estado: rifa.estado })})'>📅 Aplazar / cambiar fecha</button>
         <p class="text-xs text-ink-600 mt-2">¿No se vendieron todas las boletas? Cambia la fecha y la hora del sorteo, o vuelve a abrir la rifa si estaba cerrada.</p>` : ''}
@@ -1195,6 +1264,7 @@ async function renderResumen(rifa, d) {
         <div class="flex gap-2 mt-4">
           <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/exportar-excel">⬇️ Excel</a>
           <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/exportar-csv">📄 CSV</a>
+          <button class="btn btn-outline btn-sm" onclick="exportarReportePDF(${rifa.id})">📋 PDF</button>
           <a class="btn btn-outline btn-sm" href="/api/backup">💾 Backup .db</a>
         </div>
       </div>
@@ -3284,6 +3354,86 @@ function crearPDF(lineas) {
   return bytes;
 }
 
+// Exporta un reporte completo de la rifa como PDF
+async function exportarReportePDF(rifaId) {
+  const rifa = await api('/rifas/' + rifaId);
+  const participantes = await api('/rifas/' + rifaId + '/participantes');
+  const ganadores = await api('/rifas/' + rifaId + '/ganadores');
+
+  const pagados = participantes.filter(p => p.estado_pago === 'pagado');
+  const pendientes = participantes.filter(p => p.estado_pago === 'pendiente');
+  const lineas = [];
+  const separador = '==========================================';
+
+  lineas.push('REPORTE COMPLETO DE RIFA');
+  lineas.push('RIFAS COLOMBIA PRO');
+  lineas.push(separador);
+  lineas.push('Rifa: ' + rifa.nombre);
+  lineas.push('Producto/Premio: ' + (rifa.producto || ''));
+  lineas.push('Modalidad: ' + (rifa.modalidad_boleta || 'BOLETAS_NORMAL'));
+  lineas.push('Estado: ' + rifa.estado);
+  lineas.push('Fecha sorteo: ' + (rifa.fecha_sorteo || 'No programada'));
+  lineas.push('Rango: ' + rifa.rango_min + ' - ' + rifa.rango_max);
+  lineas.push('Precio boleta: $' + Number(rifa.precio_boleta || 0).toLocaleString('es-CO'));
+  lineas.push('Total boletas: ' + participantes.length);
+  lineas.push('Vendidas (pagadas): ' + pagados.length);
+  lineas.push('Pendientes: ' + pendientes.length);
+  const recaudado = pagados.length * Number(rifa.precio_boleta || 0);
+  lineas.push('Recaudado: $' + recaudado.toLocaleString('es-CO'));
+  if (rifa.modalidad_premio === '50_50') {
+    const porcentaje = rifa.porcentaje_organizador || 50;
+    lineas.push('Modalidad: 50/50');
+    lineas.push('Organizador (' + porcentaje + '%): $' + Math.round(recaudado * porcentaje / 100).toLocaleString('es-CO'));
+    lineas.push('Ganador (' + (100 - porcentaje) + '%): $' + Math.round(recaudado * (100 - porcentaje) / 100).toLocaleString('es-CO'));
+  }
+  lineas.push('Reporte generado: ' + new Date().toLocaleString('es-CO'));
+  lineas.push('');
+
+  if (ganadores.length) {
+    lineas.push(separador);
+    lineas.push('GANADORES');
+    lineas.push(separador);
+    ganadores.forEach((g, i) => {
+      lineas.push((i + 1) + '. Numero: ' + g.numero + ' | Ganador: ' + g.nombre + ' | Modalidad: ' + g.modalidad);
+      if (g.semilla) lineas.push('   Semilla: ' + g.semilla);
+    });
+    lineas.push('');
+  }
+
+  lineas.push(separador);
+  lineas.push('BOLETAS PAGADAS (' + pagados.length + ')');
+  lineas.push(separador);
+  pagados.forEach(p => {
+    lineas.push('#' + p.numero + ' | ' + (p.nombre || '') + ' | Tel: ' + (p.telefono || '') + ' | Cedula: ' + (p.cedula || ''));
+  });
+  lineas.push('');
+
+  if (pendientes.length) {
+    lineas.push(separador);
+    lineas.push('BOLETAS PENDIENTES (' + pendientes.length + ')');
+    lineas.push(separador);
+    pendientes.forEach(p => {
+      lineas.push('#' + p.numero + ' | ' + (p.nombre || '') + ' | Tel: ' + (p.telefono || ''));
+    });
+    lineas.push('');
+  }
+
+  lineas.push(separador);
+  lineas.push('FIN DEL REPORTE');
+  lineas.push('Rifas Colombia PRO - ' + new Date().getFullYear());
+
+  const bytes = crearPDF(lineas);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'reporte-rifa-' + rifa.id + '-' + rifa.nombre.replace(/[^a-zA-Z0-9]/g, '_') + '.pdf';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
 // -------------------------- TAB WHATSAPP (TAREA 5) --------------------------------
 async function renderWhatsappTab(rifa, box) {
   const [plantillas, participantes] = await Promise.all([
@@ -3818,13 +3968,14 @@ async function renderAdminUsuarios(container) {
           <h2 style="margin:0;">👥 Usuarios del sistema</h2>
           <p class="text-sm text-ink-600">${usuarios.length} usuario(s) registrado(s) · ${sesiones.length} sesión(es) activa(s)</p>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn btn-gold" id="btn-crear-usuario">➕ Crear usuario</button>
           <button class="btn btn-outline" id="btn-ver-sesiones">🔐 Sesiones activas (${sesiones.length})</button>
         </div>
       </div>
 
       <div class="card" style="overflow-x:auto;">
+        <div class="table-wrap">
         <table style="width:100%; border-collapse:collapse; font-size:14px;">
           <thead>
             <tr style="border-bottom:2px solid var(--line); text-align:left;">
@@ -3870,6 +4021,7 @@ async function renderAdminUsuarios(container) {
             `).join('')}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div id="admin-sesiones-panel" style="display:none; margin-top:24px;"></div>
@@ -3891,6 +4043,7 @@ function toggleSesionesPanel(sesiones) {
   panel.innerHTML = `
     <div class="card">
       <h3 style="margin:0 0 12px;">🔐 Sesiones activas (${sesiones.length})</h3>
+      <div class="table-wrap">
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead>
           <tr style="border-bottom:2px solid var(--line); text-align:left;">
@@ -3917,6 +4070,7 @@ function toggleSesionesPanel(sesiones) {
           `).join('')}
         </tbody>
       </table>
+      </div>
     </div>
   `;
 }
