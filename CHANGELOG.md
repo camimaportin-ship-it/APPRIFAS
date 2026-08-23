@@ -1,4 +1,4 @@
-# Changelog — Rifas Colombia PRO
+# Changelog — Rifas SYC
 
 Historial de versiones del aplicativo.
 

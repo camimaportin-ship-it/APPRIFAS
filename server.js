@@ -34,7 +34,7 @@ if (!db.prepare("SELECT 1 FROM config WHERE clave = 'vapid_keys'").get()) {
     .run(JSON.stringify(keys));
 }
 const storedVapid = JSON.parse(db.prepare("SELECT valor FROM config WHERE clave = 'vapid_keys'").get().valor);
-webPush.setVapidDetails('mailto:admin@rifaspro.local', storedVapid.publicKey, storedVapid.privateKey);
+  webPush.setVapidDetails('mailto:admin@rifassyc.local', storedVapid.publicKey, storedVapid.privateKey);
 
 function enviarPush(titulo, cuerpo, data = {}) {
   const subs = db.prepare("SELECT * FROM push_subscriptions WHERE activa = 1").all();
@@ -866,7 +866,7 @@ app.post('/api/push/unsubscribe', (req, res) => {
 
 app.get('/api/push/test', (req, res) => {
   try {
-    enviarPush('Rifas PRO', 'Notificaciones funcionando correctamente');
+    enviarPush('Rifas SYC', 'Notificaciones funcionando correctamente');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2446,7 +2446,7 @@ app.get('*', (req, res) => {
 
 function intentarPuerto(puerto) {
   const server = app.listen(puerto, () => {
-    console.log(`\n[SERVER] Rifas Colombia PRO corriendo en http://localhost:${puerto}`);
+    console.log(`\n[SERVER] Rifas SYC corriendo en http://localhost:${puerto}`);
     console.log(`[SERVER] Base de datos SQLite en: ${dbPath}\n`);
     purgarPapeleraVencida();
   });

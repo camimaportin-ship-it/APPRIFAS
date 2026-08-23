@@ -1,7 +1,7 @@
 {
-  "name": "rifas-colombia-pro",
+  "name": "rifas-syc",
   "version": "2.1.0",
-  "description": "RifasPRO - Sistema de rifas independiente: 2 modalidades de boleta, grilla de elección, generador de poster 1080x1080, balotera virtual animada y envío masivo de WhatsApp personalizado sin pagar API de Meta.",
+  "description": "Rifas SYC - Sistema de rifas independiente: 6 modalidades de boleta, grilla de elección, generador de poster 1080x1080, balotera virtual animada y envío masivo de WhatsApp personalizado sin pagar API de Meta.",
   "main": "server.js",
   "engines": {
     "node": ">=18"

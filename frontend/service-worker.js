@@ -6,7 +6,7 @@
 // (esta app corre en la misma red/máquina, así que "offline" aquí significa
 // "sin internet", no "sin el propio servidor").
 // -----------------------------------------------------------------------------
-const CACHE_NAME = 'rifas-pro-shell-v6';
+const CACHE_NAME = 'rifas-syc-shell-v6';
 const APP_SHELL = [
   '/', '/index.html', '/style.css', '/app.js',
   '/components/RuletaCanvas.js', '/components/GeneradorImagen.js',
@@ -60,7 +60,7 @@ self.addEventListener('fetch', (event) => {
 // Push notifications
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
-  const title = data.title || 'Rifas PRO';
+  const title = data.title || 'Rifas SYC';
   const options = {
     body: data.body || 'Nueva notificación',
     icon: data.icon || '/icons/icon-192.png',

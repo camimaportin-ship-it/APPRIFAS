@@ -49,7 +49,7 @@ async function conectar() {
   conexion.qr = null;
 
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'rifaspro' }),
+    authStrategy: new LocalAuth({ clientId: 'rifassyc' }),
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu']

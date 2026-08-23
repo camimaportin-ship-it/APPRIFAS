@@ -42,7 +42,7 @@ const state = {
   ruletaInstancia: null,
   waPoll: null,
   waJobPoll: null,
-  authToken: localStorage.getItem('rifaspro_token') || null,
+  authToken: localStorage.getItem('rifassyc_token') || null,
   usuario: null
 };
 
@@ -71,7 +71,7 @@ async function verificarSesion() {
 function cerrarSesion() {
   state.authToken = null;
   state.usuario = null;
-  localStorage.removeItem('rifaspro_token');
+    localStorage.removeItem('rifassyc_token');
 }
 
 function mostrarLogin() {
@@ -144,7 +144,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Credenciales inválidas');
     state.authToken = data.token;
-    localStorage.setItem('rifaspro_token', data.token);
+    localStorage.setItem('rifassyc_token', data.token);
     state.usuario = { usuario: data.usuario, nombre: data.nombre, rol: data.rol };
     mostrarApp();
     initApp();
@@ -1602,7 +1602,7 @@ async function exportarMapaNumeros(rifaId, modo) {
     ctx.fillStyle = '#9CA3AF';
     ctx.font = '9px Sora, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Rifas Colombia PRO', W / 2, H - 12);
+    ctx.fillText('Rifas SYC', W / 2, H - 12);
 
     c.toBlob(blob => {
       const url = URL.createObjectURL(blob);
@@ -1717,7 +1717,7 @@ async function exportarGruposImagen(rifaId, modo) {
     ctx.fillStyle = '#9CA3AF';
     ctx.font = '9px Sora, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Rifas Colombia PRO — rifaspro.local', W / 2, H - 15);
+    ctx.fillText('Rifas SYC — rifassyc.local', W / 2, H - 15);
 
     // Descargar
     c.toBlob(blob => {
@@ -3332,7 +3332,7 @@ function descargarActaPDF(rifa, resultado) {
   const esChance = modoEsChance(rifa);
   const lineas = [];
   lineas.push('ACTA DE SORTEO');
-  lineas.push('RIFAS COLOMBIA PRO');
+  lineas.push('RIFAS SYC');
   lineas.push('------------------------------------------');
   lineas.push('Rifa: ' + rifa.nombre);
   lineas.push('Producto / premio: ' + rifa.producto);
@@ -3430,7 +3430,7 @@ async function exportarReportePDF(rifaId) {
   const separador = '==========================================';
 
   lineas.push('REPORTE COMPLETO DE RIFA');
-  lineas.push('RIFAS COLOMBIA PRO');
+  lineas.push('RIFAS SYC');
   lineas.push(separador);
   lineas.push('Rifa: ' + rifa.nombre);
   lineas.push('Producto/Premio: ' + (rifa.producto || ''));
@@ -3484,7 +3484,7 @@ async function exportarReportePDF(rifaId) {
 
   lineas.push(separador);
   lineas.push('FIN DEL REPORTE');
-  lineas.push('Rifas Colombia PRO - ' + new Date().getFullYear());
+  lineas.push('Rifas SYC - ' + new Date().getFullYear());
 
   const bytes = crearPDF(lineas);
   const blob = new Blob([bytes], { type: 'application/pdf' });
@@ -3957,7 +3957,7 @@ async function renderPaginaPublica(id) {
         <div class="numeros-grid">
           ${numeros.map(n => `<div class="numero-chip ${n.estado}"><span>${fmtNum(rifa, n.numero)}</span>${n.nombre ? `<span class="who">${escapeHtml(n.nombre.split(' ')[0])}</span>` : ''}</div>`).join('')}
         </div>`}
-      <p class="text-center text-xs text-ink-600 mt-4 mb-4">Generado con Rifas Colombia PRO · ${DISCLAIMER}</p>
+      <p class="text-center text-xs text-ink-600 mt-4 mb-4">Generado con Rifas SYC · ${DISCLAIMER}</p>
     </div>`);
 }
 

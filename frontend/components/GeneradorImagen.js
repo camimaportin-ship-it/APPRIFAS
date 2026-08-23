@@ -41,7 +41,7 @@ class GeneradorImagen {
     return new Promise((resolve) => {
       if (!url) return resolve(null);
       let token = null;
-      try { token = localStorage.getItem('rifaspro_token'); } catch (e) {}
+      try { token = localStorage.getItem('rifassyc_token'); } catch (e) {}
       const opts = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
       fetch(url, opts)
         .then(r => (r.ok ? r.blob() : Promise.reject()))

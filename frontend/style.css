@@ -1,5 +1,5 @@
 /* =============================================================================
-   style.css — Sistema de diseño "Rifas Colombia PRO"
+   style.css — Sistema de diseño "Rifas SYC"
    -----------------------------------------------------------------------------
    Nota de decisión de arquitectura: el brief pide Tailwind, pero Tailwind vía
    CDN requiere internet (rompe el requisito "offline-first / sin internet").
@@ -78,7 +78,7 @@ input,select,textarea{font-family:inherit;}
 .sidebar.colapsado .sidebar-logout-btn{font-size:0; padding:8px;}
 .sidebar.colapsado .sidebar-logout-btn::before{content:'🚪'; font-size:14px;}
 .sidebar__brand{display:flex; align-items:center; gap:10px; padding:22px 20px; border-bottom:1px solid rgba(255,255,255,.08); min-width:0;}
-.sidebar__brand-mark{width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,var(--gold-400),var(--gold-500)); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; color:var(--navy-950); flex-shrink:0;}
+.sidebar__brand-mark{width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,var(--gold-400),var(--gold-500)); display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--navy-950); flex-shrink:0;}
 .sidebar__brand-text{font-family:var(--font-display); font-weight:700; font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;}
 .sidebar__brand-sub{font-size:11px; color:var(--gold-400); letter-spacing:.06em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .sidebar nav{padding:14px 10px; display:flex; flex-direction:column; gap:2px; flex:1; overflow-y:auto; overflow-x:hidden;}

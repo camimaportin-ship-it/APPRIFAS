@@ -1,4 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="80" fill="#0B1229"/>
-  <text x="256" y="310" font-size="260" text-anchor="middle" fill="#D4A017" font-family="Arial,Helvetica,sans-serif" font-weight="bold">R</text>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1229"/>
+      <stop offset="100%" stop-color="#16213F"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E8B923"/>
+      <stop offset="100%" stop-color="#D4A017"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="80" fill="url(#bg)"/>
+  <!-- Dado 1 (izquierda) -->
+  <g transform="translate(100, 120) rotate(-15, 90, 90)">
+    <rect x="20" y="20" width="140" height="140" rx="20" fill="url(#gold)" opacity="0.9"/>
+    <circle cx="55" cy="55" r="12" fill="#0B1229"/>
+    <circle cx="125" cy="55" r="12" fill="#0B1229"/>
+    <circle cx="55" cy="125" r="12" fill="#0B1229"/>
+    <circle cx="125" cy="125" r="12" fill="#0B1229"/>
+    <circle cx="90" cy="90" r="12" fill="#0B1229"/>
+  </g>
+  <!-- Dado 2 (derecha) -->
+  <g transform="translate(260, 160) rotate(10, 75, 75)">
+    <rect x="20" y="20" width="130" height="130" rx="18" fill="#D4A017" opacity="0.7"/>
+    <circle cx="50" cy="50" r="10" fill="#0B1229"/>
+    <circle cx="120" cy="50" r="10" fill="#0B1229"/>
+    <circle cx="85" cy="85" r="10" fill="#0B1229"/>
+    <circle cx="50" cy="120" r="10" fill="#0B1229"/>
+    <circle cx="120" cy="120" r="10" fill="#0B1229"/>
+  </g>
+  <!-- Estrella centrada -->
+  <polygon points="256,280 268,310 300,310 274,328 284,358 256,340 228,358 238,328 212,310 244,310" fill="#E8B923"/>
+  <!-- Texto SYC -->
+  <text x="256" y="440" font-size="72" text-anchor="middle" fill="#D4A017" font-family="Arial,Helvetica,sans-serif" font-weight="bold" letter-spacing="8">SYC</text>
 </svg>
