@@ -23,7 +23,7 @@ function generarCaptcha() {
 }
 window._captchaActual = null;
 function esChance4D(rifa) {
-  return !!rifa && ['CHANCE_3_GANADORES', 'CHANCE_INDIVIDUAL'].includes(rifa.modalidad_boleta) && Number(rifa.cifras || 4) >= 4;
+  return !!rifa && rifa.modalidad_boleta === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4;
 }
 
 // ------------------------------- ESTADO GLOBAL --------------------------------
@@ -1007,7 +1007,11 @@ function bindFormularioRifa(rifa) {
     const rangoMax = form.querySelector('input[name=rango_max]');
     const cantidad = form.querySelector('input[name=cantidad_max_participantes]');
     let total = 0;
-    if (val === 'CHANCE_3_GANADORES' || esInd) {
+    if (val === 'CHANCE_3_GANADORES') {
+      total = 100;
+      if (rangoMin) rangoMin.value = 0;
+      if (rangoMax) rangoMax.value = 99;
+    } else if (esInd) {
       total = Math.pow(10, n);
       if (rangoMin) rangoMin.value = 0;
       if (rangoMax) rangoMax.value = Math.pow(10, n) - 1;

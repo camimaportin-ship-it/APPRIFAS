@@ -420,19 +420,20 @@ function esChanceSimbolo(rifa) {
 function esChanceIndividual(rifa) {
   return !!rifa && rifa.modalidad_boleta === 'CHANCE_INDIVIDUAL';
 }
-// Chance de 4 cifras SIN símbolo (números 0000-9999)
+// Chance de 4 cifras SIN símbolo (números 0000-9999) — solo CHANCE_INDIVIDUAL
 function esChance4D(rifa) {
-  return !!rifa && ['CHANCE_3_GANADORES', 'CHANCE_INDIVIDUAL'].includes(rifa.modalidad_boleta)
+  return !!rifa && rifa.modalidad_boleta === 'CHANCE_INDIVIDUAL'
     && Number(rifa.cifras || 4) >= 4;
 }
 // Pad de un número de boleta chance según la modalidad (2 o 4 cifras)
 function padChance(rifa, numero) {
+  if (rifa.modalidad_boleta === 'CHANCE_3_GANADORES') return String(numero).padStart(2, '0');
   const d = esChance4D(rifa) ? 4 : 2;
   return String(numero).padStart(d, '0');
 }
 
 // Busca la boleta PAGADA ganadora de un premio, según la modalidad:
-//  - CHANCE_3_GANADORES: substring de 2 cifras sobre el número de 4 dígitos
+//  - CHANCE_3_GANADORES: boletas 00-99, se compara directo contra el grupo de 2 cifras del sorteo
 //  - CHANCE_INDIVIDUAL: número exacto (2 o 4 dígitos), sin símbolo
 //  - CHANCE_CON_SIMBOLO: (número 2 dígitos, símbolo) exacto
 function buscarGanadorChance(rifa, p, simboloGanador) {
@@ -441,8 +442,7 @@ function buscarGanadorChance(rifa, p, simboloGanador) {
     WHERE bc.rifa_id = ? AND p.estado_pago = 'pagado'`;
   if (rifa.modalidad_boleta === 'CHANCE_3_GANADORES') {
     const sub = String(p.numero).padStart(2, '0');
-    const pos = configPremiosChance(rifa, 4).posiciones[p.tipo][0];
-    return db.prepare(base + ` AND bc.simbolo = '' AND substr(printf('%04d', bc.numero), ${pos + 1}, 2) = ?`).get(rifa.id, sub);
+    return db.prepare(base + ` AND bc.simbolo = '' AND printf('%02d', bc.numero) = ?`).get(rifa.id, sub);
   }
   if (rifa.modalidad_boleta === 'CHANCE_INDIVIDUAL') {
     return db.prepare(base + ` AND bc.simbolo = '' AND bc.numero = ?`).get(rifa.id, p.numero);
@@ -489,7 +489,7 @@ function simbolosRifa(rifa) {
 }
 
 function totalTicketsChance(rifa) {
-  if (rifa.modalidad_boleta === 'CHANCE_3_GANADORES') return 10000;
+  if (rifa.modalidad_boleta === 'CHANCE_3_GANADORES') return 100;
   if (rifa.modalidad_boleta === 'CHANCE_INDIVIDUAL') return Math.pow(10, Number(rifa.cifras || 4) >= 4 ? 4 : 2);
   return 100 * simbolosRifa(rifa).length;
 }
@@ -533,13 +533,13 @@ function configPremiosChance(rifa, cifrasN) {
 
 // Pre-genera las boletas de un chance según la modalidad:
 //  - CHANCE_CON_SIMBOLO: 100 números (00-99) x N símbolos
-//  - CHANCE_3_GANADORES: 10.000 números 0000-9999 (sin símbolo)
+//  - CHANCE_3_GANADORES: 100 números 00-99 (sin símbolo) — se sortean 4 cifras y se dividen en 3 grupos de 2
 //  - CHANCE_INDIVIDUAL: 100 (00-99) o 10.000 (0000-9999) sin símbolo
 function generarBoletasChance(rifa) {
   const insert = db.prepare('INSERT OR IGNORE INTO boletas_chance (rifa_id, numero, simbolo) VALUES (?,?,?)');
   const tx = db.transaction((r) => {
     if (r.modalidad_boleta === 'CHANCE_3_GANADORES') {
-      for (let n = 0; n <= 9999; n++) insert.run(r.id, n, '');
+      for (let n = 0; n <= 99; n++) insert.run(r.id, n, '');
     } else if (r.modalidad_boleta === 'CHANCE_INDIVIDUAL') {
       const max = Number(r.cifras || 4) >= 4 ? 9999 : 99;
       for (let n = 0; n <= max; n++) insert.run(r.id, n, '');
@@ -891,15 +891,9 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
     // En múltiples oportunidades una boleta = n números (2, 4 o 5): con 100
     // números hay 100/n boletas disponibles (grupos).
     if (chance) {
-      if (b.modalidad_boleta === 'CHANCE_3_GANADORES') {
-        cantidad_max_participantes = 10000;
-        rango_min = 0;
-        rango_max = 9999;
-      } else {
-        cantidad_max_participantes = 100 * simbolos.length;
-        rango_min = 0;
-        rango_max = 99;
-      }
+      cantidad_max_participantes = 100 * simbolos.length;
+      rango_min = 0;
+      rango_max = 99;
     } else if (esMultiples) {
       cantidad_max_participantes = 100 / nOport;
       rango_min = 0;
