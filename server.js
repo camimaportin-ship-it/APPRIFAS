@@ -109,6 +109,7 @@ app.post('/api/auth/login', (req, res) => {
       rol: user.rol,
       exp: Date.now() + duracion
     });
+    registrarLog('login', 'usuario', user.id, user.usuario, `Login exitoso desde sesión ${token.slice(0, 8)}...`);
     res.json({ ok: true, token, usuario: user.usuario, nombre: user.nombre, rol: user.rol, expiraEn: duracion });
   } catch (err) {
     console.error('[AUTH LOGIN]', err);
@@ -175,6 +176,175 @@ function requireAuth(req, res, next) {
   next();
 }
 app.use(requireAuth);
+
+// ----------------------- RBAC (control de acceso por rol) --------------------
+// Jerarquía: super_admin > admin > vendedor
+function requireRole(...rolesPermitidos) {
+  return (req, res, next) => {
+    if (!req.usuario) return res.status(401).json({ error: 'No autenticado' });
+    if (!rolesPermitidos.includes(req.usuario.rol)) {
+      return res.status(403).json({ error: 'No tienes permisos para esta acción' });
+    }
+    next();
+  };
+}
+
+// ----------------------- LIMPIEZA AUTOMÁTICA DE SESIONES ---------------------
+setInterval(() => {
+  const ahora = Date.now();
+  for (const [token, sesion] of sesionesActivas) {
+    if (ahora > sesion.exp) sesionesActivas.delete(token);
+  }
+}, 10 * 60 * 1000); // cada 10 minutos
+
+// ========================= ADMINISTRACIÓN DE USUARIOS ========================
+
+// Listar usuarios (admin+)
+app.get('/api/usuarios', requireRole('super_admin', 'admin'), (req, res) => {
+  try {
+    const usuarios = db.prepare('SELECT id, nombre, usuario, email, rol, created_at FROM usuarios ORDER BY id ASC').all();
+    // Agregar info de sesiones activas
+    const activos = new Set();
+    for (const [, s] of sesionesActivas) { if (Date.now() <= s.exp) activos.add(s.usuario); }
+    const resultado = usuarios.map(u => ({ ...u, sesionActiva: activos.has(u.usuario) }));
+    res.json(resultado);
+  } catch (err) {
+    console.error('[USUARIOS LISTAR]', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Crear usuario (admin+)
+app.post('/api/usuarios', requireRole('super_admin', 'admin'), (req, res) => {
+  try {
+    const { nombre, usuario, password, email, rol } = req.body;
+    if (!nombre || !usuario || !password) {
+      return res.status(400).json({ error: 'Nombre, usuario y contraseña son requeridos' });
+    }
+    // Solo super_admin puede crear otros super_admins
+    const rolFinal = (rol === 'super_admin' && req.usuario.rol !== 'super_admin') ? 'admin' : (rol || 'vendedor');
+    if (!['super_admin', 'admin', 'vendedor'].includes(rolFinal)) {
+      return res.status(400).json({ error: 'Rol inválido' });
+    }
+    const existente = db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get(usuario);
+    if (existente) return res.status(409).json({ error: 'El usuario ya existe' });
+    const hash = bcrypt.hashSync(password, 10);
+    const info = db.prepare('INSERT INTO usuarios (nombre, usuario, email, password_hash, rol) VALUES (?,?,?,?,?)')
+      .run(nombre, usuario, email || null, hash, rolFinal);
+    registrarLog('crear-usuario', 'usuario', info.lastInsertRowid, usuario, `Usuario "${usuario}" creado con rol ${rolFinal}`);
+    res.status(201).json({ ok: true, id: info.lastInsertRowid, usuario, rol: rolFinal });
+  } catch (err) {
+    console.error('[USUARIOS CREAR]', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Editar usuario (admin+; solo super_admin puede editar super_admins)
+app.put('/api/usuarios/:id', requireRole('super_admin', 'admin'), (req, res) => {
+  try {
+    const target = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    // Solo super_admin puede editar a otro super_admin
+    if (target.rol === 'super_admin' && req.usuario.rol !== 'super_admin') {
+      return res.status(403).json({ error: 'No puedes editar un super_admin' });
+    }
+    const { nombre, email, password } = req.body;
+    if (nombre) db.prepare('UPDATE usuarios SET nombre = ? WHERE id = ?').run(nombre, target.id);
+    if (email !== undefined) db.prepare('UPDATE usuarios SET email = ? WHERE id = ?').run(email || null, target.id);
+    if (password) {
+      if (password.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+      db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), target.id);
+    }
+    registrarLog('editar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" actualizado`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[USUARIOS EDITAR]', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Cambiar rol de usuario (solo super_admin)
+app.put('/api/usuarios/:id/rol', requireRole('super_admin'), (req, res) => {
+  try {
+    const target = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (target.id === req.usuario.id) return res.status(400).json({ error: 'No puedes cambiar tu propio rol' });
+    const { rol } = req.body;
+    if (!['super_admin', 'admin', 'vendedor'].includes(rol)) {
+      return res.status(400).json({ error: 'Rol inválido' });
+    }
+    db.prepare('UPDATE usuarios SET rol = ? WHERE id = ?').run(rol, target.id);
+    registrarLog('cambiar-rol', 'usuario', target.id, target.usuario, `Rol cambiado de "${target.rol}" a "${rol}"`);
+    // Cerrar sesiones del usuario si su rol bajó de permisos
+    if (rol === 'vendedor') {
+      for (const [token, s] of sesionesActivas) {
+        if (s.usuario === target.usuario) sesionesActivas.delete(token);
+      }
+    }
+    res.json({ ok: true, rol });
+  } catch (err) {
+    console.error('[USUARIOS ROL]', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Eliminar usuario (solo super_admin; no puede eliminarse a sí mismo)
+app.delete('/api/usuarios/:id', requireRole('super_admin'), (req, res) => {
+  try {
+    const target = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (target.id === req.usuario.id) return res.status(400).json({ error: 'No puedes eliminarte a ti mismo' });
+    if (target.rol === 'super_admin') return res.status(403).json({ error: 'No puedes eliminar un super_admin' });
+    db.prepare('DELETE FROM usuarios WHERE id = ?').run(target.id);
+    // Cerrar todas sus sesiones
+    for (const [token, s] of sesionesActivas) {
+      if (s.usuario === target.usuario) sesionesActivas.delete(token);
+    }
+    registrarLog('eliminar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" eliminado`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[USUARIOS ELIMINAR]', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ========================= GESTIÓN DE SESIONES ================================
+
+// Listar sesiones activas (admin+)
+app.get('/api/sesiones', requireRole('super_admin', 'admin'), (req, res) => {
+  const ahora = Date.now();
+  const sesiones = [];
+  for (const [token, s] of sesionesActivas) {
+    if (ahora <= s.exp) {
+      sesiones.push({
+        token: token.slice(0, 8) + '...',
+        usuario: s.usuario,
+        nombre: s.nombre,
+        rol: s.rol,
+        expiraEn: new Date(s.exp).toISOString(),
+        esActual: token === (req.headers.authorization || '').replace('Bearer ', '')
+      });
+    }
+  }
+  res.json(sesiones);
+});
+
+// Cerrar sesión remota (admin+; no puede cerrar su propia sesión)
+app.delete('/api/sesiones/:tokenPrefix', requireRole('super_admin', 'admin'), (req, res) => {
+  const prefix = req.params.tokenPrefix;
+  const currentToken = (req.headers.authorization || '').replace('Bearer ', '');
+  let cerrada = false;
+  for (const [token, s] of sesionesActivas) {
+    if (token.startsWith(prefix) && token !== currentToken) {
+      registrarLog('cerrar-sesion-remota', 'sistema', null, s.usuario, `Sesión de "${s.usuario}" cerrada remotamente por ${req.usuario.usuario}`);
+      sesionesActivas.delete(token);
+      cerrada = true;
+      break;
+    }
+  }
+  if (!cerrada) return res.status(404).json({ error: 'Sesión no encontrada' });
+  res.json({ ok: true });
+});
 
 // ------------------------------ MULTER (uploads) -----------------------------
 const storage = multer.diskStorage({

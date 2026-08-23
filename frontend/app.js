@@ -66,6 +66,9 @@ function mostrarApp() {
   if (state.usuario) {
     const el = document.getElementById('sidebar-username');
     if (el) el.textContent = state.usuario.nombre + ' (' + state.usuario.rol + ')';
+    // Mostrar sección admin solo para super_admin y admin
+    const navAdmin = document.getElementById('nav-admin-section');
+    if (navAdmin) navAdmin.style.display = ['super_admin', 'admin'].includes(state.usuario.rol) ? '' : 'none';
   }
 }
 
@@ -304,6 +307,9 @@ async function router() {
     } else if (parts[0] === 'dashboard') {
       document.getElementById('page-title').textContent = 'Dashboard';
       await renderDashboard(container);
+    } else if (parts[0] === 'admin' && parts[1] === 'usuarios') {
+      document.getElementById('page-title').textContent = 'Administración de Usuarios';
+      await renderAdminUsuarios(container);
     } else {
       document.getElementById('page-title').textContent = 'Mis rifas';
       await vistaListaRifas();
@@ -3794,5 +3800,249 @@ function urlBase64ToUint8Array(base64String) {
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
   return outputArray;
+}
+
+// ================================================================================
+// VISTA: ADMINISTRACIÓN DE USUARIOS
+// ================================================================================
+
+async function renderAdminUsuarios(container) {
+  container.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>Cargando usuarios...</p></div>';
+  try {
+    const [usuarios, sesiones] = await Promise.all([api('/usuarios'), api('/sesiones')]);
+    const esSuperAdmin = state.usuario && state.usuario.rol === 'super_admin';
+
+    container.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2 style="margin:0;">👥 Usuarios del sistema</h2>
+          <p class="text-sm text-ink-600">${usuarios.length} usuario(s) registrado(s) · ${sesiones.length} sesión(es) activa(s)</p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-gold" id="btn-crear-usuario">➕ Crear usuario</button>
+          <button class="btn btn-outline" id="btn-ver-sesiones">🔐 Sesiones activas (${sesiones.length})</button>
+        </div>
+      </div>
+
+      <div class="card" style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:14px;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--line); text-align:left;">
+              <th style="padding:12px 16px;">Usuario</th>
+              <th style="padding:12px 16px;">Nombre</th>
+              <th style="padding:12px 16px;">Email</th>
+              <th style="padding:12px 16px;">Rol</th>
+              <th style="padding:12px 16px;">Estado</th>
+              <th style="padding:12px 16px;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${usuarios.map(u => `
+              <tr style="border-bottom:1px solid var(--line);">
+                <td style="padding:12px 16px; font-weight:600;">${escapeHtml(u.usuario)}</td>
+                <td style="padding:12px 16px;">${escapeHtml(u.nombre)}</td>
+                <td style="padding:12px 16px; color:var(--ink-600);">${escapeHtml(u.email || '—')}</td>
+                <td style="padding:12px 16px;">
+                  <select class="input" style="width:auto; padding:4px 8px; font-size:12px;"
+                    onchange="cambiarRolUsuario(${u.id}, this.value)"
+                    ${u.rol === 'super_admin' && !esSuperAdmin ? 'disabled' : ''}>
+                    <option value="vendedor" ${u.rol === 'vendedor' ? 'selected' : ''}>Vendedor</option>
+                    <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>Admin</option>
+                    <option value="super_admin" ${u.rol === 'super_admin' ? 'selected' : ''}>Super Admin</option>
+                  </select>
+                </td>
+                <td style="padding:12px 16px;">
+                  <span style="display:inline-flex; align-items:center; gap:4px;">
+                    <span style="width:8px; height:8px; border-radius:50%; background:${u.sesionActiva ? '#22c55e' : '#94a3b8'}; display:inline-block;"></span>
+                    ${u.sesionActiva ? 'En línea' : 'Fuera'}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;">
+                  <div style="display:flex; gap:6px;">
+                    <button class="btn btn-ghost btn-sm" onclick="editarUsuarioModal(${u.id}, '${escapeHtml(u.usuario)}', '${escapeHtml(u.nombre)}', '${escapeHtml(u.email || '')}')">✏️</button>
+                    <button class="btn btn-ghost btn-sm" onclick="resetPasswordModal(${u.id}, '${escapeHtml(u.usuario)}')">🔑</button>
+                    ${esSuperAdmin && u.rol !== 'super_admin' && u.usuario !== state.usuario.usuario
+                      ? `<button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="eliminarUsuario(${u.id}, '${escapeHtml(u.usuario)}')">🗑️</button>`
+                      : ''}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div id="admin-sesiones-panel" style="display:none; margin-top:24px;"></div>
+    `;
+
+    document.getElementById('btn-crear-usuario').addEventListener('click', crearUsuarioModal);
+    document.getElementById('btn-ver-sesiones').addEventListener('click', () => toggleSesionesPanel(sesiones));
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function toggleSesionesPanel(sesiones) {
+  const panel = document.getElementById('admin-sesiones-panel');
+  if (!panel) return;
+  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  const esSuperAdmin = state.usuario && state.usuario.rol === 'super_admin';
+  panel.style.display = '';
+  panel.innerHTML = `
+    <div class="card">
+      <h3 style="margin:0 0 12px;">🔐 Sesiones activas (${sesiones.length})</h3>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--line); text-align:left;">
+            <th style="padding:8px 12px;">Token</th>
+            <th style="padding:8px 12px;">Usuario</th>
+            <th style="padding:8px 12px;">Rol</th>
+            <th style="padding:8px 12px;">Expira</th>
+            <th style="padding:8px 12px;">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sesiones.map(s => `
+            <tr style="border-bottom:1px solid var(--line);">
+              <td style="padding:8px 12px; font-family:monospace;">${escapeHtml(s.token)}</td>
+              <td style="padding:8px 12px;">${escapeHtml(s.nombre)} ${s.esActual ? '<span class="text-xs" style="color:var(--gold-400);">(tú)</span>' : ''}</td>
+              <td style="padding:8px 12px;"><span class="badge">${escapeHtml(s.rol)}</span></td>
+              <td style="padding:8px 12px; font-size:12px;">${new Date(s.expiraEn).toLocaleString('es-CO')}</td>
+              <td style="padding:8px 12px;">
+                ${!s.esActual && esSuperAdmin
+                  ? `<button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="cerrarSesionRemota('${escapeHtml(s.token)}')">🚪 Cerrar</button>`
+                  : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function crearUsuarioModal() {
+  abrirModal(`
+    <div class="modal__header"><h3>➕ Crear usuario</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
+    <form id="form-crear-usuario" class="modal__body">
+      <label class="input-label">Nombre completo *</label>
+      <input class="input" name="nombre" required placeholder="Ej: Juan Pérez">
+      <label class="input-label">Usuario *</label>
+      <input class="input" name="usuario" required placeholder="Ej: juan123">
+      <label class="input-label">Email</label>
+      <input class="input" name="email" type="email" placeholder="juan@ejemplo.com">
+      <label class="input-label">Contraseña *</label>
+      <input class="input" name="password" type="password" required minlength="6" placeholder="Mínimo 6 caracteres">
+      <label class="input-label">Rol</label>
+      <select class="input" name="rol">
+        <option value="vendedor">Vendedor</option>
+        <option value="admin">Admin</option>
+        ${state.usuario && state.usuario.rol === 'super_admin' ? '<option value="super_admin">Super Admin</option>' : ''}
+      </select>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button type="button" class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Crear usuario</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('form-crear-usuario').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/usuarios', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: fd.get('nombre'), usuario: fd.get('usuario'),
+          email: fd.get('email'), password: fd.get('password'), rol: fd.get('rol')
+        })
+      });
+      toast('Usuario creado');
+      cerrarModal();
+      renderAdminUsuarios(document.getElementById('view-container'));
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+function editarUsuarioModal(id, usuario, nombre, email) {
+  abrirModal(`
+    <div class="modal__header"><h3>✏️ Editar usuario "${escapeHtml(usuario)}"</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
+    <form id="form-editar-usuario" class="modal__body">
+      <label class="input-label">Nombre</label>
+      <input class="input" name="nombre" value="${escapeHtml(nombre)}">
+      <label class="input-label">Email</label>
+      <input class="input" name="email" type="email" value="${escapeHtml(email)}">
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button type="button" class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Guardar</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('form-editar-usuario').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/usuarios/' + id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: fd.get('nombre'), email: fd.get('email') })
+      });
+      toast('Usuario actualizado');
+      cerrarModal();
+      renderAdminUsuarios(document.getElementById('view-container'));
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+function resetPasswordModal(id, usuario) {
+  abrirModal(`
+    <div class="modal__header"><h3>🔑 Cambiar contraseña de "${escapeHtml(usuario)}"</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
+    <form id="form-reset-pw" class="modal__body">
+      <label class="input-label">Nueva contraseña *</label>
+      <input class="input" name="password" type="password" required minlength="6" placeholder="Mínimo 6 caracteres">
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button type="button" class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Cambiar contraseña</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('form-reset-pw').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/usuarios/' + id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: fd.get('password') })
+      });
+      toast('Contraseña actualizada');
+      cerrarModal();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+async function eliminarUsuario(id, usuario) {
+  if (!confirm(`¿Eliminar el usuario "${usuario}"? Se cerrarán todas sus sesiones.`)) return;
+  try {
+    await api('/usuarios/' + id, { method: 'DELETE' });
+    toast('Usuario eliminado');
+    renderAdminUsuarios(document.getElementById('view-container'));
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function cambiarRolUsuario(id, nuevoRol) {
+  try {
+    await api('/usuarios/' + id + '/rol', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rol: nuevoRol })
+    });
+    toast('Rol actualizado');
+  } catch (err) { toast(err.message, 'error'); renderAdminUsuarios(document.getElementById('view-container')); }
+}
+
+async function cerrarSesionRemota(tokenPrefix) {
+  if (!confirm('¿Cerrar esta sesión remotamente?')) return;
+  try {
+    await api('/sesiones/' + tokenPrefix, { method: 'DELETE' });
+    toast('Sesión cerrada');
+    renderAdminUsuarios(document.getElementById('view-container'));
+  } catch (err) { toast(err.message, 'error'); }
 }
 
