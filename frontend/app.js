@@ -4142,6 +4142,17 @@ async function renderAdminUsuarios(container) {
       </div>
 
       <div id="admin-sesiones-panel" style="display:none; margin-top:24px;"></div>
+
+      ${esSuperAdmin ? `
+      <div class="card" style="margin-top:24px; padding:20px;">
+        <h3 style="margin:0 0 8px;">💾 Respaldo de datos</h3>
+        <p class="text-sm text-ink-600" style="margin:0 0 16px;">Exporta o restaura la base de datos completa. Útil para migrar datos entre servidores o recuperar después de un despliegue.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <a class="btn btn-outline btn-sm" href="/api/backup">💾 Descargar backup .db</a>
+          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup .db</button>
+        </div>
+      </div>
+      ` : ''}
     `;
 
     document.getElementById('btn-crear-usuario').addEventListener('click', crearUsuarioModal);
