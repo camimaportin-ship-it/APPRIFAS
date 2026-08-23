@@ -1121,6 +1121,7 @@ function bindFormularioRifa(rifa) {
     // Los campos deshabilitados no viajan en FormData: forzamos valores
     const esCuatro = fd.get('modalidad_boleta') === 'CUATRO_OPORTUNIDADES';
     const esChance = fd.get('modalidad_boleta') === 'CHANCE_CON_SIMBOLO';
+    const esOport4D = fd.get('modalidad_boleta') === 'OPORTUNIDADES_4D';
     if (esCuatro) {
       const n = Number(fd.get('n_oportunidades') || 4);
       fd.set('rango_min', '0'); fd.set('rango_max', '99'); fd.set('cantidad_max_participantes', String(100 / n));
@@ -1132,7 +1133,12 @@ function bindFormularioRifa(rifa) {
       fd.set('simbolos', JSON.stringify(simbolos));
       fd.set('rango_min', '0'); fd.set('rango_max', '99'); fd.set('cantidad_max_participantes', String(total));
     }
-    if (!esCuatro && !esChance) {
+    if (esOport4D) {
+      fd.set('rango_min', '0');
+      fd.set('rango_max', '9999');
+      fd.set('cantidad_max_participantes', '10000');
+    }
+    if (!esCuatro && !esChance && !esOport4D) {
       fd.set('rango_min', fd.get('rango_min') || '0');
       fd.set('rango_max', fd.get('rango_max') || '99');
       fd.set('cantidad_max_participantes', fd.get('cantidad_max_participantes') || '100');

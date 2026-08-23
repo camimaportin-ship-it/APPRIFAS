@@ -403,8 +403,9 @@ function numsBoleta(p) {
   return [Number(p && p.numero)];
 }
 
-// Formatea un número para mostrarlo: con 2 dígitos en CUATRO_OPORTUNIDADES y CHANCE
+// Formatea un número para mostrarlo: con 2 dígitos en CUATRO_OPORTUNIDADES y CHANCE, 4 en OPORTUNIDADES_4D
 function fmtNumero(rifa, n) {
+  if (rifa && rifa.modalidad_boleta === 'OPORTUNIDADES_4D') return String(n).padStart(4, '0');
   if (rifa && (rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES' || rifa.modalidad_boleta === 'CHANCE_CON_SIMBOLO')) return String(n).padStart(2, '0');
   return String(n);
 }
@@ -591,10 +592,41 @@ function generarGruposMultiples(n) {
   return grupos;
 }
 
+// Genera grupos aleatorios de 4 números para OPORTUNIDADES_4D (0000-9999).
+// Cada boleta compra 4 números al azar sin repetir. Total: 2500 boletas.
+function generarGrupos4D() {
+  const total = 10000;
+  const n = 4;
+  const k = total / n;
+  const todos = Array.from({ length: total }, (_, i) => i);
+  for (let i = todos.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [todos[i], todos[j]] = [todos[j], todos[i]];
+  }
+  const grupos = [];
+  for (let i = 0; i < k; i++) {
+    grupos.push(todos.slice(i * n, (i + 1) * n).sort((a, b) => a - b));
+  }
+  return grupos;
+}
+
 // Devuelve los grupos de la rifa; si no existen (rifa de múltiples oportunidades
 // creada antes de esta versión) los genera con la cantidad de números indicada
 // en n_oportunidades y los guarda en la base de datos.
+// Para OPORTUNIDADES_4D genera grupos de 4 números desde 0000-9999.
 function asegurarGrupos(rifa) {
+  if (rifa.modalidad_boleta === 'OPORTUNIDADES_4D') {
+    let grupos = [];
+    if (rifa.grupos_numeros) {
+      try { grupos = JSON.parse(rifa.grupos_numeros); } catch (e) { grupos = []; }
+    }
+    if (!Array.isArray(grupos) || grupos.length === 0) {
+      grupos = generarGrupos4D();
+      db.prepare('UPDATE rifas SET grupos_numeros = ? WHERE id = ?').run(JSON.stringify(grupos), rifa.id);
+      rifa.grupos_numeros = JSON.stringify(grupos);
+    }
+    return grupos;
+  }
   const n = nOportunidades(rifa);
   if (!n) return [];
   let grupos = [];
@@ -887,13 +919,29 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
     const nOport = esMultiples ? (Number(b.n_oportunidades) || 4) : 0;
     if (esMultiples && ![2, 4, 5].includes(nOport)) return res.status(400).json({ error: 'La cantidad de oportunidades debe ser 2, 4 o 5' });
 
-    // Múltiples oportunidades y CHANCE fijan su propio espacio (00-99 fijo).
-    // En múltiples oportunidades una boleta = n números (2, 4 o 5): con 100
-    // números hay 100/n boletas disponibles (grupos).
+    // Cada modalidad fija su propio espacio de números:
+    // - CHANCE_CON_SIMBOLO: 100 números × N símbolos
+    // - CHANCE_3_GANADORES: 100 boletas 00-99 (sorteo 4 cifras → 3 premios de 2)
+    // - CHANCE_INDIVIDUAL: 100 (2 cifras) o 10.000 (4 cifras) sin símbolo
+    // - OPORTUNIDADES_4D: 10.000 números 0000-9999, cada boleta compra 4 al azar
+    // - CUATRO_OPORTUNIDADES: 100 números, cada boleta compra 2/4/5
     if (chance) {
-      cantidad_max_participantes = 100 * simbolos.length;
       rango_min = 0;
-      rango_max = 99;
+      if (b.modalidad_boleta === 'CHANCE_3_GANADORES') {
+        cantidad_max_participantes = 100;
+        rango_max = 99;
+      } else if (b.modalidad_boleta === 'CHANCE_INDIVIDUAL') {
+        const cifrasI = Number(b.cifras || 4);
+        cantidad_max_participantes = Math.pow(10, cifrasI);
+        rango_max = Math.pow(10, cifrasI) - 1;
+      } else {
+        cantidad_max_participantes = 100 * simbolos.length;
+        rango_max = 99;
+      }
+    } else if (b.modalidad_boleta === 'OPORTUNIDADES_4D') {
+      cantidad_max_participantes = 10000;
+      rango_min = 0;
+      rango_max = 9999;
     } else if (esMultiples) {
       cantidad_max_participantes = 100 / nOport;
       rango_min = 0;
@@ -936,6 +984,16 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
     if (chance) {
       // Pre-generar las boletas del chance según la modalidad
       generarBoletasChance(getRifa(rifaId));
+    } else if (b.modalidad_boleta === 'OPORTUNIDADES_4D') {
+      // Generar 10.000 números 0000-9999
+      const insertNumero = db.prepare('INSERT INTO numeros (rifa_id, numero, estado) VALUES (?,?,\'libre\')');
+      const insertMany = db.transaction(() => {
+        for (let n = 0; n <= 9999; n++) insertNumero.run(rifaId, n);
+      });
+      insertMany();
+      // Generar grupos de 4 números al azar
+      const rifaNueva = getRifa(rifaId);
+      asegurarGrupos(rifaNueva);
     } else {
       // Pre-generar todos los números del rango como "libre"
       const insertNumero = db.prepare('INSERT INTO numeros (rifa_id, numero, estado) VALUES (?,?,\'libre\')');
@@ -1783,7 +1841,10 @@ app.post('/api/rifas/:id/balotera', (req, res) => {
   if (pagados.length === 0) return res.status(400).json({ error: 'No hay boletas pagadas para sortear' });
 
   const totalBoletas = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES'
-    ? (100 / nOportunidades(rifa)) : rifa.cantidad_max_participantes;
+    ? (100 / nOportunidades(rifa))
+    : rifa.modalidad_boleta === 'OPORTUNIDADES_4D'
+    ? 2500
+    : rifa.cantidad_max_participantes;
 
   // Elegir un número ganador al azar (con semilla para transparencia)
   let numeroGanador = null;
