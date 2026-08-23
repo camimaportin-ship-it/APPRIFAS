@@ -48,7 +48,7 @@ const LogicaSorteo = {
   // boletas = [{ numero, simbolo, estado, nombre }] (desde /boletas-chance)
   boletasGanadoras(boletas, tarjeta) {
     const num = Number(tarjeta.numero);
-    return (boletas || []).filter(b => Number(b.numero) === num && b.simbolo === tarjeta.simbolo && b.estado === 'vendida');
+    return (boletas || []).filter(b => Number(b.numero) === num && b.simbolo === tarjeta.simbolo && b.estado === 'pagado');
   }
 };
 

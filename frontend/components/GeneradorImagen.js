@@ -47,8 +47,8 @@ class GeneradorImagen {
         .then(r => (r.ok ? r.blob() : Promise.reject()))
         .then(blob => {
           const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => resolve(null);
+          img.onload = () => { URL.revokeObjectURL(img.src); resolve(img); };
+          img.onerror = () => { URL.revokeObjectURL(img.src); resolve(null); };
           img.src = URL.createObjectURL(blob);
         })
         .catch(() => resolve(null));

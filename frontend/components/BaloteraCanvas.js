@@ -195,6 +195,7 @@ class BaloteraCanvas {
   }
 
   async jugar(duracionMs = 5500) {
+    if (this._raf) cancelAnimationFrame(this._raf);
     const canvas = this.canvas;
     const W = canvas.width, H = canvas.height;
     const ctx = this.ctx;

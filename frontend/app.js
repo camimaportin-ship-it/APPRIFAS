@@ -1996,9 +1996,11 @@ function modalEditarParticipante(rifaId, p) {
 
 async function eliminarParticipante(id, rifaId) {
   if (!confirm('¿Eliminar participante y liberar su número?')) return;
-  await api('/participantes/' + id, { method: 'DELETE' });
-  toast('Participante eliminado, número liberado');
-  vistaDetalleRifa(rifaId, 'participantes');
+  try {
+    await api('/participantes/' + id, { method: 'DELETE' });
+    toast('Participante eliminado, número liberado');
+    vistaDetalleRifa(rifaId, 'participantes');
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // Ficha informativa del comprador de una casilla / grupo (mapa clickeable)
@@ -2046,18 +2048,22 @@ function recordatorioWhatsapp({ nombre, numeros, rifa_nombre, valor, telefono })
 
 async function clonarRifa(id) {
   if (!confirm('¿Clonar esta rifa? Se creará una copia con la misma configuración.')) return;
-  const nueva = await api('/rifas/' + id + '/clonar', { method: 'POST' });
-  toast('Rifa clonada como borrador');
-  window.location.hash = '#/rifas/' + nueva.id + '/editar';
+  try {
+    const nueva = await api('/rifas/' + id + '/clonar', { method: 'POST' });
+    toast('Rifa clonada como borrador');
+    window.location.hash = '#/rifas/' + nueva.id + '/editar';
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 async function eliminarRifa(id, nombre) {
   const rifa = state.rifaActual || {};
   const nombreMostrar = nombre || rifa.nombre || id;
   if (!confirm(`¿Eliminar "${nombreMostrar}"? Se moverá a la papelera y podrás restaurarla desde el filtro "Eliminadas".`)) return;
-  await api('/rifas/' + id, { method: 'DELETE' });
-  toast('Rifa movida a la papelera');
-  window.location.hash = '#/rifas';
+  try {
+    await api('/rifas/' + id, { method: 'DELETE' });
+    toast('Rifa movida a la papelera');
+    window.location.hash = '#/rifas';
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // Aplazar / cambiar fecha y hora del sorteo, o reabrir una rifa cerrada
@@ -2844,6 +2850,9 @@ async function ejecutarBalotera(rifa) {
       return `<li data-numero="${escapeHtml(nums[0])}"><span class="mono">#${escapeHtml(nums.join(', '))}</span><span>${escapeHtml(p.nombre || '')}</span></li>`;
     }).join('');
 
+    const btn = document.getElementById('btn-jugar-balotera');
+    if (btn) btn.disabled = true;
+
     area.innerHTML = `
       <div class="card card-pad">
         <div class="anim-layout">
@@ -2857,8 +2866,6 @@ async function ejecutarBalotera(rifa) {
           </div>
         </div>
       </div>`;
-    const btn = document.getElementById('btn-jugar-balotera');
-    if (btn) btn.disabled = true;
 
     // 1) El backend decide el ganador y lo persiste
     const resultado = await api('/rifas/' + rifa.id + '/balotera', {
@@ -3423,6 +3430,7 @@ async function renderWhatsappTab(rifa, box) {
   });
 
   document.getElementById('btn-enviar-wa').addEventListener('click', async () => {
+    const btnEnviar = document.getElementById('btn-enviar-wa');
     const plantillaId = document.getElementById('sel-plantilla-envio').value;
     const destino = document.getElementById('sel-destino-envio').value;
     let participanteIds = destino;
@@ -3430,6 +3438,8 @@ async function renderWhatsappTab(rifa, box) {
       participanteIds = [...document.querySelectorAll('#lista-compradores input:checked')].map(c => Number(c.value));
       if (participanteIds.length === 0) { toast('Marca al menos un comprador', 'error'); return; }
     }
+    btnEnviar.disabled = true;
+    btnEnviar.textContent = 'Enviando...';
     try {
       const r = await api(`/rifas/${rifa.id}/whatsapp/enviar`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3438,6 +3448,7 @@ async function renderWhatsappTab(rifa, box) {
       toast(`📨 Envío iniciado a ${r.job.total} persona(s). Revisa el log.`);
       iniciarPollJob();
     } catch (e) { toast(e.message, 'error'); }
+    finally { btnEnviar.disabled = false; btnEnviar.textContent = '📨 Enviar mensajes'; }
   });
 
   document.getElementById('btn-enlace-grupo').addEventListener('click', async () => {

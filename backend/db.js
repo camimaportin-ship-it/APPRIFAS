@@ -17,12 +17,13 @@ class SqlJsWrapper {
   constructor(sqlJsDb) {
     this._db = sqlJsDb;
     this._path = dbPath;
+    this._inTransaction = false;
   }
 
   // Ejecuta SQL sin retorno de resultados (DDL, DML multi-statement)
   exec(sql) {
     this._db.run(sql);
-    this._save();
+    if (!this._inTransaction) this._save();
   }
 
   // PRAGMA: retorna array de objetos (para table_info, etc.)
@@ -49,14 +50,17 @@ class SqlJsWrapper {
   transaction(fn) {
     const self = this;
     return function (...args) {
+      self._inTransaction = true;
       self._db.run('BEGIN IMMEDIATE');
       try {
         const result = fn(...args);
         self._db.run('COMMIT');
+        self._inTransaction = false;
         self._save();
         return result;
       } catch (err) {
         self._db.run('ROLLBACK');
+        self._inTransaction = false;
         throw err;
       }
     };
@@ -118,7 +122,7 @@ class StatementWrapper {
       const r = this._wrapper._db.exec('SELECT last_insert_rowid() AS id');
       if (r.length > 0 && r[0].values.length > 0) lastInsertRowid = r[0].values[0][0];
     } catch (e) { /* ignorar */ }
-    this._wrapper._save();
+    if (!this._wrapper._inTransaction) this._wrapper._save();
     return { changes, lastInsertRowid };
   }
 }

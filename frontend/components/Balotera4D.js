@@ -120,6 +120,7 @@ class Balotera4D {
   }
 
   jugar(duracionTotal) {
+    if (this._raf) cancelAnimationFrame(this._raf);
     this.container.innerHTML = this._tankDOM();
     this._setupTanks();
     const total = this.tanks.length;

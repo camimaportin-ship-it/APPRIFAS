@@ -482,8 +482,7 @@ function liberarVencidos(rifaId) {
   const rifa = db.prepare('SELECT * FROM rifas WHERE id = ?').get(rifaId);
   if (!rifa || !rifa.auto_liberar_horas) return 0;
 
-  const limite = new Date(Date.now() - rifa.auto_liberar_horas * 3600 * 1000)
-    .toISOString().slice(0, 19).replace('T', ' ');
+  const limite = db.prepare("SELECT datetime('now', '-' || ? || ' hours', 'localtime') AS fecha").get(rifa.auto_liberar_horas).fecha;
 
   const vencidos = db.prepare(`
     SELECT p.id as participante_id, p.numero
@@ -638,9 +637,15 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
     // En múltiples oportunidades una boleta = n números (2, 4 o 5): con 100
     // números hay 100/n boletas disponibles (grupos).
     if (chance) {
-      cantidad_max_participantes = 100 * simbolos.length;
-      rango_min = 0;
-      rango_max = 99;
+      if (b.modalidad_boleta === 'CHANCE_3_GANADORES') {
+        cantidad_max_participantes = 10000;
+        rango_min = 0;
+        rango_max = 9999;
+      } else {
+        cantidad_max_participantes = 100 * simbolos.length;
+        rango_min = 0;
+        rango_max = 99;
+      }
     } else if (esMultiples) {
       cantidad_max_participantes = 100 / nOport;
       rango_min = 0;
@@ -825,7 +830,7 @@ app.post('/api/rifas/:id/clonar', (req, res) => {
   const nuevaId = info.lastInsertRowid;
 
   if (chance) {
-    generarBoletasChance(rifa);
+    generarBoletasChance(getRifa(nuevaId));
   } else {
     const insertNumero = db.prepare('INSERT INTO numeros (rifa_id, numero, estado) VALUES (?,?,\'libre\')');
     const insertMany = db.transaction((min, max) => { for (let n = min; n <= max; n++) insertNumero.run(nuevaId, n); });
@@ -1053,8 +1058,9 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
       boletaChance = db.prepare('SELECT * FROM boletas_chance WHERE rifa_id=? AND numero=? AND simbolo=?').get(rifaId, numeroChance, simboloLimpio);
       if (!boletaChance) return res.status(400).json({ error: 'Esa combinación de número y símbolo no existe en esta rifa' });
     } else {
-      boletaChance = db.prepare("SELECT * FROM boletas_chance WHERE rifa_id=? AND estado='libre' ORDER BY RANDOM() LIMIT 1").get(rifaId);
-      if (!boletaChance) return res.status(409).json({ error: 'No quedan boletas disponibles' });
+      const libres = db.prepare("SELECT numero FROM numeros WHERE rifa_id=? AND estado='libre'").all(rifaId);
+      if (!libres.length) return res.status(409).json({ error: 'No quedan números disponibles' });
+      elegidos = [shuffle(libres)[0].numero];
     }
 
     if (boletaChance.estado !== 'libre') {
@@ -1095,21 +1101,20 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
     }
   }
 
-  // --- Validar que los elegidos existen y están libres ----------------------
-  if (!chance) {
-    for (const n of elegidos) {
-      const fila = db.prepare('SELECT * FROM numeros WHERE rifa_id=? AND numero=?').get(rifaId, n);
-      if (!fila) return res.status(400).json({ error: `El número ${fmtNumero(rifa, n)} no existe en el rango de la rifa` });
-      if (fila.estado !== 'libre') return res.status(409).json({
-        error: esCuatro
-          ? `Ese grupo de ${nOport} oportunidades ya no está disponible (el número ${fmtNumero(rifa, n)} está ocupado)`
-          : `El número ${fmtNumero(rifa, n)} ya está ocupado`
-      });
-    }
-  }
-  elegidos.sort((a, b) => a - b);
-
+  // --- Validar que los elegidos existen y están libres (dentro de la transacción) ---
   const insertar = db.transaction(() => {
+    if (!chance) {
+      for (const n of elegidos) {
+        const fila = db.prepare('SELECT * FROM numeros WHERE rifa_id=? AND numero=?').get(rifaId, n);
+        if (!fila) throw new Error(`El número ${fmtNumero(rifa, n)} no existe en el rango de la rifa`);
+        if (fila.estado !== 'libre') throw new Error(
+          esCuatro
+            ? `Ese grupo de ${nOport} oportunidades ya no está disponible (el número ${fmtNumero(rifa, n)} está ocupado)`
+            : `El número ${fmtNumero(rifa, n)} ya está ocupado`
+        );
+      }
+    }
+    elegidos.sort((a, b) => a - b);
     const info = chance
       ? db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, simbolo, numeros) VALUES (?,?,?,?,?,?,?)')
           .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], simboloElegido,
@@ -1125,7 +1130,16 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
     }
     return info.lastInsertRowid;
   });
-  const id = insertar();
+  let id;
+  try {
+    id = insertar();
+  } catch (err) {
+    const msg = err.message || String(err);
+    if (msg.includes('ya está ocupado') || msg.includes('no existe')) {
+      return res.status(409).json({ error: msg });
+    }
+    return res.status(400).json({ error: msg });
+  }
   registrarHistorial(rifaId, 'registro',
     chance
       ? `${nombreLimpio} registrado con la boleta ${ticketLabel(elegidos[0], simboloElegido)}`

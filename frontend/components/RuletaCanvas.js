@@ -175,6 +175,7 @@ class RuletaCanvas {
   /** Inicia la grabación del canvas como video (para la "evidencia") */
   iniciarGrabacion() {
     if (!this.canvas.captureStream) return false;
+    if (this._mediaRecorder && this._mediaRecorder.state === 'recording') return false;
     const stream = this.canvas.captureStream(30);
     this._chunks = [];
     try {
@@ -190,7 +191,7 @@ class RuletaCanvas {
   /** Detiene la grabación y devuelve una Promise con la URL del blob .webm */
   detenerGrabacion() {
     return new Promise((resolve) => {
-      if (!this._mediaRecorder) return resolve(null);
+      if (!this._mediaRecorder || this._mediaRecorder.state !== 'recording') return resolve(null);
       this._mediaRecorder.onstop = () => {
         const blob = new Blob(this._chunks, { type: 'video/webm' });
         this.videoBlobUrl = URL.createObjectURL(blob);
@@ -207,7 +208,8 @@ class RuletaCanvas {
    * @returns {Promise<string>} URL del video grabado (blob)
    */
   async girarHasta(numeroGanador, duracionMs = 4500) {
-    const idx = this.participantes.findIndex(p => p.numero === numeroGanador);
+    if (this._raf) cancelAnimationFrame(this._raf);
+    const idx = this.participantes.findIndex(p => String(p.numero) === String(numeroGanador));
     if (idx === -1) throw new Error('El número ganador no está en la ruleta');
 
     this._winnerIdx = idx;
@@ -242,6 +244,7 @@ class RuletaCanvas {
     // Medio segundo extra grabando el resultado quieto, luego cortamos
     await new Promise(r => setTimeout(r, 600));
     this._mostrarGanador = true;
+    this._bake();
     this.dibujar();
     return this.detenerGrabacion();
   }
