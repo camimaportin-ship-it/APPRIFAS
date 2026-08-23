@@ -14,11 +14,17 @@ const QRCode = require('qrcode');
 const XLSX = require('xlsx');
 const webPush = require('web-push');
 
-const { db, dbPath } = require('./backend/db');
+const { initDB, ensureSchema, dbPath } = require('./backend/db');
 const whatsapp = require('./backend/whatsapp');
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const bcrypt = require('bcryptjs');
 const cryptoToken = require('crypto');
+
+let db;
+
+async function startApp() {
+db = await initDB();
+ensureSchema(db);
 
 // ----------------------- PUSH NOTIFICATIONS -----------------------------------
 // Generar VAPID keys una vez y persistirlas en tabla config
@@ -2129,4 +2135,8 @@ function purgarPapeleraVencida() {
   } catch (e) { console.error('[Papelera] Error en purge automático:', e.message); }
 }
 setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
+
+} // fin startApp()
+
+startApp().catch(err => { console.error('[FATAL]', err); process.exit(1); });
 
