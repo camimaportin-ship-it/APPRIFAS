@@ -277,17 +277,48 @@ function abrirModal(html) {
 }
 function cerrarModal() { document.getElementById('modal-root').innerHTML = ''; }
 
-// ----------------------- SIDEBAR MÓVIL (off-canvas) --------------------------
+// ----------------------- SIDEBAR (desktop: colapsar / móvil: off-canvas) ----------
+function esMobile() { return window.innerWidth <= 860; }
+
 function setSidebar(abrir) {
   const sb = document.getElementById('sidebar');
   const back = document.getElementById('sidebar-backdrop');
-  sb.classList.toggle('open', abrir);
-  back.classList.toggle('visible', abrir);
+  if (esMobile()) {
+    // Móvil: off-canvas
+    sb.classList.toggle('open', abrir);
+    back.classList.toggle('visible', abrir);
+  } else {
+    // Desktop: colapsar / expandir
+    sb.classList.toggle('colapsado', !abrir);
+  }
 }
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (esMobile()) {
+    setSidebar(!sb.classList.contains('open'));
+  } else {
+    setSidebar(sb.classList.contains('colapsado'));
+  }
+}
+
+// Restaurar estado del sidebar al redimensionar
+let _lastWidth = window.innerWidth;
+window.addEventListener('resize', () => {
+  const sb = document.getElementById('sidebar');
+  const back = document.getElementById('sidebar-backdrop');
+  const cambioBreakpoint = (_lastWidth > 860) !== (window.innerWidth > 860);
+  _lastWidth = window.innerWidth;
+  if (cambioBreakpoint) {
+    sb.classList.remove('open', 'colapsado');
+    back.classList.remove('visible');
+  }
+});
+
 document.addEventListener('click', (e) => {
-  if (e.target.closest('#btn-toggle-sidebar')) setSidebar(true);
+  if (e.target.closest('#btn-toggle-sidebar')) toggleSidebar();
   else if (e.target.closest('#sidebar-backdrop')) setSidebar(false);
-  else if (e.target.closest('.nav-link')) setSidebar(false);
+  else if (e.target.closest('.nav-link') && esMobile()) setSidebar(false);
 });
 
 const DISCLAIMER = 'ADVERTENCIA: Esta rifa es modalidad promocional entre particulares. Decreto 2480 de 2005. Cumpla normatividad Coljuegos.';

@@ -61,8 +61,22 @@ input,select,textarea{font-family:inherit;}
 .sidebar{
   width:240px; background:var(--navy-950); color:#fff; flex-shrink:0;
   display:flex; flex-direction:column; position:sticky; top:0; height:100vh;
-  overflow:hidden;
+  overflow:hidden; transition:width .25s ease, left .25s ease;
 }
+.sidebar.colapsado{width:64px;}
+.sidebar.colapsado .sidebar__brand-text,
+.sidebar.colapsado .sidebar__brand-sub,
+.sidebar.colapsado .nav-link span,
+.sidebar.colapsado .nav-sec,
+.sidebar.colapsado #sidebar-user-info span,
+.sidebar.colapsado .sidebar__legal{display:none;}
+.sidebar.colapsado .sidebar__brand{justify-content:center; padding:18px 8px;}
+.sidebar.colapsado .sidebar__brand-mark{margin:0;}
+.sidebar.colapsado nav{padding:14px 6px;}
+.sidebar.colapsado .nav-link{justify-content:center; padding:10px;}
+.sidebar.colapsado .sidebar__footer{padding:14px 8px;}
+.sidebar.colapsado .sidebar-logout-btn{font-size:0; padding:8px;}
+.sidebar.colapsado .sidebar-logout-btn::before{content:'🚪'; font-size:14px;}
 .sidebar__brand{display:flex; align-items:center; gap:10px; padding:22px 20px; border-bottom:1px solid rgba(255,255,255,.08);}
 .sidebar__brand-mark{width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,var(--gold-400),var(--gold-500)); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; color:var(--navy-950);}
 .sidebar__brand-text{font-family:var(--font-display); font-weight:700; font-size:16px;}
@@ -323,9 +337,11 @@ table.tbl tr:hover td{background:var(--line-soft);}
 /* ---------- Lista de números disponibles (resumen) ---------- */
 .disponibles-lista{max-height:180px; overflow-y:auto;}
 
-/* ---------- Responsive sidebar (base: oculto en móvil) ---------- */
+/* ---------- Sidebar toggle: siempre visible ---------- */
+#btn-toggle-sidebar{display:inline-flex!important;}
+
+/* ---------- Responsive sidebar (base: off-canvas en móvil) ---------- */
 @media(max-width:860px){
-  #btn-toggle-sidebar{display:inline-flex!important;}
   .sidebar{position:fixed; left:-260px; width:260px; z-index:50; transition:left .25s ease; box-shadow:var(--shadow-lg);}
   .sidebar.open{left:0;}
   .content{padding:18px;}
@@ -623,9 +639,8 @@ table.tbl tr:hover td{background:var(--gold-100);}
 .rifas-list-item__actions{flex:0 0 auto; display:flex; gap:2px;}
 @media(max-width:700px){.rifas-list-item{flex-wrap:wrap; gap:10px;} .rifas-list-item__stats{width:100%; flex-direction:row; justify-content:space-between; align-items:center;}}
 
-/* ---------- Sidebar m�vil con backdrop ---------- */
+/* ---------- Sidebar móvil con backdrop ---------- */
 @media(max-width:860px){
-  #btn-toggle-sidebar{display:inline-flex!important;}
   .sidebar{left:-260px; width:260px;}
   .sidebar.open{left:0; box-shadow:var(--shadow-lg);}
   #sidebar-backdrop{display:none; position:fixed; inset:0; background:rgba(11,18,41,.55); z-index:40; backdrop-filter:blur(2px);}
