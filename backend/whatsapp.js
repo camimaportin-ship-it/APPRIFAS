@@ -257,12 +257,28 @@ function textoEnlaceGrupo(db, rifaId, plantillaId) {
 
 // Números de una boleta (participante). Para BOLETAS_NORMAL es [numero];
 // para CUATRO_OPORTUNIDADES son los 4 números de la boleta.
+// Aplica zero-padding según la modalidad de la rifa.
 function numsBoleta(p, rifa) {
   try {
     const arr = JSON.parse(p.numeros);
-    if (Array.isArray(arr) && arr.length) return arr.map(Number);
+    if (Array.isArray(arr) && arr.length) {
+      return arr.map(n => {
+        const num = Number(n);
+        if (rifa) {
+          const m = rifa.modalidad_boleta;
+          if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return String(num).padStart(4, '0');
+          if (m === 'CUATRO_OPORTUNIDADES' || m === 'CHANCE_CON_SIMBOLO' || m === 'CHANCE_3_GANADORES' || m === 'BOLETAS_NORMAL') return String(num).padStart(2, '0');
+        }
+        return String(num).padStart(2, '0');
+      });
+    }
   } catch (e) { /* falla -> usa p.numero */ }
-  return [Number(p.numero)];
+  const num = Number(p.numero);
+  if (rifa) {
+    const m = rifa.modalidad_boleta;
+    if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return [String(num).padStart(4, '0')];
+  }
+  return [String(num).padStart(2, '0')];
 }
 
 module.exports = {

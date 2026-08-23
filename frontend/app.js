@@ -11,6 +11,14 @@ function modoEsChance(rifa) {
   return ['CHANCE_CON_SIMBOLO', 'CHANCE_INDIVIDUAL', 'CHANCE_3_GANADORES'].includes(rifa.modalidad_boleta);
 }
 
+// Formatea un número con ceros a la izquierda según la modalidad de la rifa
+function fmtNum(rifa, n) {
+  if (!rifa) return String(n);
+  const m = rifa.modalidad_boleta;
+  if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return String(n).padStart(4, '0');
+  return String(n).padStart(2, '0');
+}
+
 // CAPTCHA matemático simple (sin dependencias, offline-first)
 function generarCaptcha() {
   const ops = ['+', '-', '×'];
@@ -262,10 +270,13 @@ function nOport(rifa) {
 }
 
 // Muestra los números de una boleta (1 normal / n en múltiples oportunidades)
+// Siempre aplica zero-padding: 2 dígitos (00-99) o 4 dígitos (0000-9999) según modalidad
 function mostrarNumerosBoleta(rifa, p) {
   const arr = (p && p.numeros && p.numeros.length ? p.numeros : [p && p.numero]).filter(n => n != null);
-  const pad = rifa && rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
-  return arr.map(n => pad ? String(n).padStart(2, '0') : String(n)).join(', ');
+  const m = rifa && rifa.modalidad_boleta;
+  const es4D = m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4);
+  const pad = es4D ? 4 : 2;
+  return arr.map(n => String(n).padStart(pad, '0')).join(', ');
 }
 
 function abrirModal(html) {
@@ -2383,7 +2394,7 @@ async function renderSorteoTab(rifa, box) {
     box.innerHTML = `<div class="card card-pad text-center">
       <div style="font-size:40px;">🏆</div>
       <h3 class="mb-2">Esta rifa ya fue sorteada</h3>
-      ${ganadores.map(g => `<p class="mb-1">Número ganador: <strong class="mono" style="font-size:20px; color:var(--gold-500);">#${g.numero}</strong> — ${escapeHtml(g.nombre || '')}</p>`).join('')}
+      ${ganadores.map(g => `<p class="mb-1">Número ganador: <strong class="mono" style="font-size:20px; color:var(--gold-500);">#${fmtNum(rifa, g.numero)}</strong> — ${escapeHtml(g.nombre || '')}</p>`).join('')}
       <p class="text-xs text-ink-600 mt-2">Semilla de transparencia: <span class="mono">${ganadores[0].semilla}</span></p>
       <a href="#/rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial completo</a>
     </div>`;
@@ -2461,7 +2472,11 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
 
   try {
     if (modalidad === 'ruleta') {
-      const etiquetar = (n) => rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES' ? String(n).padStart(2, '0') : String(n);
+      const etiquetar = (n) => {
+        const m = rifa.modalidad_boleta;
+        if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return String(n).padStart(4, '0');
+        return String(n).padStart(2, '0');
+      };
       const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span class="mono">#${etiquetar(p.numero)}</span><span>${escapeHtml(p.nombre || '')}</span></li>`).join('');
       area.innerHTML = `
         <div class="card card-pad">
@@ -2496,7 +2511,7 @@ function mostrarResultadoSorteo(rifa, resultado, videoUrl) {
     <div class="card card-pad text-center mt-4">
       <div style="font-size:40px;">🏆</div>
       <h3 class="mb-2">¡Sorteo realizado!</h3>
-      ${resultado.ganadores.map(g => `<p class="mb-1">Número ganador: <strong class="mono" style="font-size:22px; color:var(--gold-500);">#${g.numero}</strong> — ${escapeHtml(g.nombre)}</p>`).join('')}
+      ${resultado.ganadores.map(g => `<p class="mb-1">Número ganador: <strong class="mono" style="font-size:22px; color:var(--gold-500);">#${fmtNum(rifa, g.numero)}</strong> — ${escapeHtml(g.nombre)}</p>`).join('')}
       <div style="background:rgba(212,160,23,.08); border:1px solid rgba(212,160,23,.25); border-radius:10px; padding:14px 18px; margin:16px 0; text-align:left;">
         <p style="font-size:13px; font-weight:700; color:var(--gold-500); margin-bottom:6px;">🔐 Transparencia verificable</p>
         <p style="font-size:12px; color:var(--ink-600); margin-bottom:6px;">Semilla de verificación: <span class="mono" style="font-weight:700;">${resultado.semilla}</span></p>
@@ -2768,7 +2783,12 @@ async function renderPruebaRifa(container, rifaId) {
 
     const rangoLen = String(rifa.rango_max).length;
     const cifrasBal = rangoLen >= 5 ? 5 : rangoLen >= 3 ? 4 : 2;
-    const etiquetar = esNormal ? (n) => String(n) : (n) => String(n).padStart(2, '0');
+    const etiquetar = (n) => {
+      if (esNormal) return String(n).padStart(2, '0');
+      const m = rifa.modalidad_boleta;
+      if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return String(n).padStart(4, '0');
+      return String(n).padStart(2, '0');
+    };
 
     const filasRuleta = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span class="mono">#${etiquetar(p.numero)}</span><span>${escapeHtml(p.nombre || '')}</span></li>`).join('');
 
@@ -2867,7 +2887,7 @@ async function renderBaloteraTab(rifa, box) {
       box.innerHTML = `<div class="card card-pad text-center">
         <div style="font-size:44px;">🎱</div>
         <h3 class="mb-2">¡Esta rifa ya tiene ganador!</h3>
-        ${ganadores.map(g => `<p style="font-size:26px; font-weight:700; color:var(--gold-500);">GANADOR: ${g.numero} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
+        ${ganadores.map(g => `<p style="font-size:26px; font-weight:700; color:var(--gold-500);">GANADOR: ${fmtNum(rifa, g.numero)} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
         <p class="text-xs text-ink-600 mt-2">Semilla verificable: <span class="mono">${ganadores[0].semilla}</span></p>
         <a href="#/rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial</a>
       </div>`;
@@ -3743,7 +3763,7 @@ async function renderHistorialTab(rifa, box) {
     ganadorHtml = `<div class="card card-pad text-center mb-4" style="background:linear-gradient(135deg,var(--navy-950),var(--navy-800)); color:#fff;">
       <div style="font-size:44px;">🏆</div>
       <h3 style="color:var(--gold-400);">Ganador de "${escapeHtml(rifa.nombre)}"</h3>
-      ${ganadores.map(g => `<p style="font-size:22px; font-weight:700;">#${g.numero} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
+      ${ganadores.map(g => `<p style="font-size:22px; font-weight:700;">#${fmtNum(rifa, g.numero)} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
       <p class="text-xs mt-2" style="color:rgba(255,255,255,.6)">Modalidad: ${ganadores[0].modalidad} · Semilla: <span class="mono">${ganadores[0].semilla}</span></p>
     </div>`;
     setTimeout(() => confetti({ particleCount: 140, spread: 100, origin: { y: 0.4 } }), 200);
@@ -3918,7 +3938,7 @@ async function renderPaginaPublica(id) {
         <div class="card card-pad text-center mb-4" style="background:var(--gold-100); border-color:var(--gold-500);">
           <div style="font-size:36px;">🏆</div>
           <h3>¡Ya tenemos ganador!</h3>
-          ${ganadores.map(g => `<p style="font-size:20px; font-weight:700;">#${g.numero} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
+          ${ganadores.map(g => `<p style="font-size:20px; font-weight:700;">#${fmtNum(rifa, g.numero)} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
           <p class="text-xs text-ink-600">Semilla verificable: <span class="mono">${ganadores[0].semilla}</span></p>
         </div>` : ''}
       ${rifa.imagen_producto ? `<img src="${rifa.imagen_producto}" style="width:100%; max-height:320px; object-fit:cover; border-radius:16px; margin-bottom:16px;">` : ''}
@@ -3935,7 +3955,7 @@ async function renderPaginaPublica(id) {
         </div>` : `
         <h3 class="mb-3">Lista de números</h3>
         <div class="numeros-grid">
-          ${numeros.map(n => `<div class="numero-chip ${n.estado}"><span>${n.numero}</span>${n.nombre ? `<span class="who">${escapeHtml(n.nombre.split(' ')[0])}</span>` : ''}</div>`).join('')}
+          ${numeros.map(n => `<div class="numero-chip ${n.estado}"><span>${fmtNum(rifa, n.numero)}</span>${n.nombre ? `<span class="who">${escapeHtml(n.nombre.split(' ')[0])}</span>` : ''}</div>`).join('')}
         </div>`}
       <p class="text-center text-xs text-ink-600 mt-4 mb-4">Generado con Rifas Colombia PRO · ${DISCLAIMER}</p>
     </div>`);

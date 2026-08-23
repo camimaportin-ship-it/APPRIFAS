@@ -33,12 +33,13 @@ const LogicaSorteo = {
   // Devuelve [{ tipo, grupo, nombre, numero, simbolo, ganador }]
   tarjetasDesdePremios(resultado) {
     const simbolo = resultado.simbolo;
+    const cifras = resultado.nCifras || 4;
     const premios = (resultado.premios || []).filter(p => p.sorteado);
     return premios.map(p => ({
       tipo: p.tipo,
       grupo: LogicaSorteo.grupoDe(p.tipo),
       nombre: p.nombre || 'Premio',
-      numero: String(p.numero).padStart(2, '0'),
+      numero: String(p.numero).padStart(cifras >= 4 && String(p.numero).length > 2 ? 4 : 2, '0'),
       simbolo,
       ganador: p.ganador || null
     }));

@@ -403,11 +403,16 @@ function numsBoleta(p) {
   return [Number(p && p.numero)];
 }
 
-// Formatea un número para mostrarlo: con 2 dígitos en CUATRO_OPORTUNIDADES y CHANCE, 4 en OPORTUNIDADES_4D
+// Formatea un número para mostrarlo con ceros a la izquierda según la modalidad:
+//  - OPORTUNIDADES_4D: 4 dígitos (0000-9999)
+//  - CHANCE_INDIVIDUAL con 4+ cifras: 4 dígitos
+//  - Todas las demás: 2 dígitos (00-99)
 function fmtNumero(rifa, n) {
-  if (rifa && rifa.modalidad_boleta === 'OPORTUNIDADES_4D') return String(n).padStart(4, '0');
-  if (rifa && (rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES' || rifa.modalidad_boleta === 'CHANCE_CON_SIMBOLO')) return String(n).padStart(2, '0');
-  return String(n);
+  if (!rifa) return String(n);
+  const m = rifa.modalidad_boleta;
+  if (m === 'OPORTUNIDADES_4D') return String(n).padStart(4, '0');
+  if (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4) return String(n).padStart(4, '0');
+  return String(n).padStart(2, '0');
 }
 
 // --------------------------- CHANCE CON SÍMBOLO --------------------------------
@@ -495,9 +500,10 @@ function totalTicketsChance(rifa) {
   return 100 * simbolosRifa(rifa).length;
 }
 
-// Etiqueta de boleta CHANCE: "47 😁"
-function ticketLabel(numero, simbolo) {
-  return String(numero).padStart(2, '0') + (simbolo ? ' ' + simbolo : '');
+// Etiqueta de boleta CHANCE: "47 😁" o "0047 😁" (según cifras)
+function ticketLabel(numero, simbolo, rifa) {
+  const padded = rifa ? fmtNumero(rifa, numero) : String(numero).padStart(2, '0');
+  return padded + (simbolo ? ' ' + simbolo : '');
 }
 
 // Cifras que se sortean en un chance: 2 | 4 | 5. (2 es lo mínimo para un premio)
@@ -709,7 +715,7 @@ function liberarVencidos(rifaId) {
       db.prepare("UPDATE boletas_chance SET estado = 'libre', participante_id = NULL, fecha_reservado = NULL WHERE participante_id = ?")
         .run(f.participante_id);
       db.prepare('DELETE FROM participantes WHERE id = ?').run(f.participante_id);
-      registrarHistorial(rifaId, 'auto-liberacion', `Boleta de ${f.numero || f.participante_id} liberada por vencimiento de pago`);
+      registrarHistorial(rifaId, 'auto-liberacion', `Boleta de ${fmtNumero(rifa, f.numero) || f.participante_id} liberada por vencimiento de pago`);
     }
   });
   if (vencidos.length) liberar(vencidos);
@@ -1376,7 +1382,7 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
     }
 
     if (boletaChance.estado !== 'libre') {
-      return res.status(409).json({ error: `La boleta ${ticketLabel(boletaChance.numero, boletaChance.simbolo)} ya no está disponible` });
+      return res.status(409).json({ error: `La boleta ${ticketLabel(boletaChance.numero, boletaChance.simbolo, rifa)} ya no está disponible` });
     }
     elegidos = [boletaChance.numero];
     simboloElegido = boletaChance.simbolo;
@@ -1430,7 +1436,7 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
     const info = chance
       ? db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, simbolo, numeros) VALUES (?,?,?,?,?,?,?)')
           .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], simboloElegido,
-            JSON.stringify([ticketLabel(elegidos[0], simboloElegido)]))
+            JSON.stringify([ticketLabel(elegidos[0], simboloElegido, rifa)]))
       : db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, numeros) VALUES (?,?,?,?,?,?)')
           .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], JSON.stringify(elegidos));
     if (chance) {
@@ -1454,7 +1460,7 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
   }
   registrarHistorial(rifaId, 'registro',
     chance
-      ? `${nombreLimpio} registrado con la boleta ${ticketLabel(elegidos[0], simboloElegido)}`
+      ? `${nombreLimpio} registrado con la boleta ${ticketLabel(elegidos[0], simboloElegido, rifa)}`
       : `${nombreLimpio} registrado con ${elegidos.length === 1 ? 'el número ' + fmtNumero(rifa, elegidos[0]) : 'los números ' + elegidos.map(n => fmtNumero(rifa, n)).join(', ')}`);
   const creado = db.prepare('SELECT * FROM participantes WHERE id = ?').get(id);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
@@ -1542,7 +1548,7 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
       }
 
       const info = chance
-        ? insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], simboloAsignado, JSON.stringify([ticketLabel(asignados[0], simboloAsignado)]))
+        ? insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], simboloAsignado, JSON.stringify([ticketLabel(asignados[0], simboloAsignado, rifa)]))
         : insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], null, JSON.stringify(asignados));
       if (chance) marcarBoleta.run(info.lastInsertRowid, boletaChance.id);
       else for (const n of asignados) marcarNumero.run(info.lastInsertRowid, rifaId, n);
@@ -1571,8 +1577,9 @@ app.get('/api/rifas/:id/participantes', (req, res) => {
 //  reasignar por aquí; se libera/elimina y se registra de nuevo si hace falta)
 app.put('/api/participantes/:id', (req, res) => {
   const p = db.prepare('SELECT * FROM participantes WHERE id = ?').get(req.params.id);
-  if (!p) return res.status(404).json({ error: 'Participante no encontrado' });
-  const b = req.body;
+    if (!p) return res.status(404).json({ error: 'Participante no encontrado' });
+    const b = req.body;
+    const rifaPart = db.prepare('SELECT * FROM rifas WHERE id = ?').get(p.rifa_id);
 
   const nombre = limpiarTexto(b.nombre, 120);
   const cedula = limpiarCedula(b.cedula);
@@ -1590,7 +1597,7 @@ app.put('/api/participantes/:id', (req, res) => {
     }
     db.prepare('UPDATE participantes SET nombre=?, cedula=?, telefono=? WHERE id=?')
       .run(nombre, cedula, telefono, req.params.id);
-    registrarHistorial(p.rifa_id, 'edicion-participante', `Datos de ${nombre} (boleta ${numsBoleta(p).join(', ')}) actualizados`);
+    registrarHistorial(p.rifa_id, 'edicion-participante', `Datos de ${nombre} (boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')}) actualizados`);
   }
 
   if (b.estado_pago !== undefined) {
@@ -1604,7 +1611,7 @@ app.put('/api/participantes/:id', (req, res) => {
     // Y las boletas del chance (número x símbolo)
     db.prepare('UPDATE boletas_chance SET estado=? WHERE participante_id=?')
       .run(estado_pago, req.params.id);
-    registrarHistorial(p.rifa_id, 'pago', `Boleta ${numsBoleta(p).join(', ')} (${nombre || p.nombre}) marcada como ${estado_pago}`);
+    registrarHistorial(p.rifa_id, 'pago', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${nombre || p.nombre}) marcada como ${estado_pago}`);
     if (estado_pago === 'pagado') {
       const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(p.rifa_id);
       enviarPush('Pago confirmado', `${nombre || p.nombre} pagó su boleta en ${rifaInfo?.nombre || 'una rifa'}`, { rifaId: p.rifa_id, tipo: 'pago' });
@@ -1623,7 +1630,7 @@ app.delete('/api/participantes/:id', (req, res) => {
   db.prepare("UPDATE boletas_chance SET estado='libre', participante_id=NULL, fecha_reservado=NULL WHERE participante_id=?")
     .run(req.params.id);
   db.prepare('DELETE FROM participantes WHERE id = ?').run(req.params.id);
-  registrarHistorial(p.rifa_id, 'liberacion-manual', `Boleta ${numsBoleta(p).join(', ')} (${p.nombre}) liberada manualmente`);
+  registrarHistorial(p.rifa_id, 'liberacion-manual', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${p.nombre}) liberada manualmente`);
   res.json({ ok: true });
 });
 
@@ -1700,7 +1707,7 @@ app.post('/api/rifas/:id/sortear', (req, res) => {
   });
   guardar();
 
-  registrarHistorial(rifaId, 'sorteo', `Modalidad ${modalidad}, semilla ${semilla}, ganadores: ${ganadores.map(g => g.numero).join(', ')}`);
+  registrarHistorial(rifaId, 'sorteo', `Modalidad ${modalidad}, semilla ${semilla}, ganadores: ${ganadores.map(g => fmtNumero(rifa, g.numero)).join(', ')}`);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
   const nombresGanadores = ganadores.map(g => g.nombre).join(', ');
   registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', modalidad, req.session?.usuario || 'sistema', semilla, ganadores, { modalidad, semilla, ganadores: ganadores.map(g => ({ numero: g.numero, nombre: g.nombre })) });
@@ -1709,7 +1716,8 @@ app.post('/api/rifas/:id/sortear', (req, res) => {
 });
 
 app.get('/api/rifas/:id/ganadores', (req, res) => {
-  res.json(db.prepare('SELECT * FROM ganadores WHERE rifa_id = ? ORDER BY fecha DESC').all(req.params.id));
+  const rifaG = getRifa(req.params.id);
+  res.json(db.prepare('SELECT * FROM ganadores WHERE rifa_id = ? ORDER BY fecha DESC').all(req.params.id).map(g => ({ ...g, numero: rifaG ? fmtNumero(rifaG, g.numero) : g.numero })));
 });
 
 app.get('/api/rifas/:id/historial', (req, res) => {
@@ -1760,7 +1768,7 @@ app.post('/api/rifas/:id/chance-sorteo', (req, res) => {
   const numeroStr = cifras.join('');
 
   const premios = tiposTotal.map(t => ({
-    tipo: t, nombre: nombres[t], numero: Number(numeroStr.slice(posiciones[t][0], posiciones[t][1]))
+    tipo: t, nombre: nombres[t], numero: fmtNumero(rifa, Number(numeroStr.slice(posiciones[t][0], posiciones[t][1])))
   }));
 
   const guardarGanador = db.prepare(`INSERT INTO ganadores
@@ -1779,8 +1787,8 @@ app.post('/api/rifas/:id/chance-sorteo', (req, res) => {
       if (boleta) {
         ganador = {
           id: boleta.participante_id, nombre: boleta.nombre, telefono: boleta.telefono || '',
-          cedula: boleta.cedula || '', numero: boleta.numero, simbolo: boleta.simbolo,
-          ticket: ticketLabel(boleta.numero, boleta.simbolo)
+          cedula: boleta.cedula || '', numero: fmtNumero(rifa, boleta.numero), simbolo: boleta.simbolo,
+          ticket: ticketLabel(boleta.numero, boleta.simbolo, rifa)
         };
         guardarGanador.run(rifaId, boleta.numero, boleta.simbolo, boleta.participante_id, boleta.nombre,
           'chance', semilla, p.nombre, p.tipo, esRevancha ? 1 : 0);
@@ -1875,8 +1883,7 @@ app.post('/api/rifas/:id/balotera', (req, res) => {
       // No persistir — el sorteo no es válido hasta que haya ganador real
       return res.json({
         semilla,
-        numero: numeroGanador,
-        numeroDisplay: fmtNumero(rifa, numeroGanador),
+        numero: fmtNumero(rifa, numeroGanador),
         cifras,
         vendidas: pagados.length,
         totalBoletas,
@@ -1896,8 +1903,7 @@ app.post('/api/rifas/:id/balotera', (req, res) => {
 
   res.json({
     semilla,
-    numero: numeroGanador,
-    numeroDisplay: fmtNumero(rifa, numeroGanador),
+    numero: fmtNumero(rifa, numeroGanador),
     cifras,
     vendidas: pagados.length,
     totalBoletas,
@@ -2413,10 +2419,10 @@ app.get('/api/public/rifa/:id', (req, res) => {
         CASE WHEN n.estado != 'libre' THEN p.nombre ELSE NULL END as nombre
       FROM numeros n LEFT JOIN participantes p ON p.id = n.participante_id
       WHERE n.rifa_id = ? ORDER BY n.numero ASC
-    `).all(req.params.id);
+    `).all(req.params.id).map(n => ({ ...n, numero: fmtNumero(rifa, n.numero) }));
   }
   const ganadores = rifa.estado === 'sorteada'
-    ? db.prepare('SELECT numero, simbolo, nombre, modalidad, semilla, fecha, premio, premio_tipo FROM ganadores WHERE rifa_id = ? ORDER BY fecha DESC').all(req.params.id)
+    ? db.prepare('SELECT numero, simbolo, nombre, modalidad, semilla, fecha, premio, premio_tipo FROM ganadores WHERE rifa_id = ? ORDER BY fecha DESC').all(req.params.id).map(g => ({ ...g, numero: fmtNumero(rifa, g.numero) }))
     : [];
   const empresa = db.prepare('SELECT nombre_empresa, logo_path, color_marca FROM empresa WHERE id = 1').get();
   res.json({ rifa, numeros, boletas, simbolos, ganadores, empresa });
