@@ -1321,6 +1321,7 @@ async function renderResumen(rifa, d) {
           <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/exportar-csv">📄 CSV</a>
           <button class="btn btn-outline btn-sm" onclick="exportarReportePDF(${rifa.id})">📋 PDF</button>
           <a class="btn btn-outline btn-sm" href="/api/backup">💾 Backup .db</a>
+          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar .db</button>
         </div>
       </div>
     </div>
@@ -4314,5 +4315,105 @@ async function cerrarSesionRemota(tokenPrefix) {
     toast('Sesión cerrada');
     renderAdminUsuarios(document.getElementById('view-container'));
   } catch (err) { toast(err.message, 'error'); }
+}
+
+// ---------------------------- RESTORE .DB -----------------------------------
+
+function abrirRestoreModal() {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div style="position:fixed; inset:0; z-index:90; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:16px;" onclick="if(event.target===this)cerrarRestoreModal()">
+      <div style="width:100%; max-width:440px; background:#16213F; border:1px solid #22315A; border-radius:18px; padding:28px 26px;">
+        <h3 style="color:#fff; font-size:20px; font-weight:800; margin-bottom:4px;">📂 Restaurar base de datos</h3>
+        <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:16px;">Sube un archivo <code>.db</code> exportado desde esta app. Se reemplazará la base de datos actual.</p>
+        <div style="padding:16px; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:10px; margin-bottom:16px;">
+          <p style="color:#fca5a5; font-size:13px; margin:0;">⚠️ <strong>Atención:</strong> Esta acción sobreescribirá TODOS los datos actuales. Se cerrarán las sesiones activas. Se recomienda hacer un backup primero.</p>
+        </div>
+        <div id="restore-drop-zone" style="border:2px dashed rgba(255,255,255,0.2); border-radius:12px; padding:32px 16px; text-align:center; cursor:pointer; transition:border-color 0.2s;" onclick="document.getElementById('restore-file-input').click()" ondragover="event.preventDefault(); this.style.borderColor='#D4A017'" ondragleave="this.style.borderColor='rgba(255,255,255,0.2)'" ondrop="event.preventDefault(); this.style.borderColor='rgba(255,255,255,0.2)'; handleRestoreFile(event.dataTransfer.files[0])">
+          <p style="color:rgba(255,255,255,0.6); font-size:14px; margin:0;">Arrastra un archivo <strong>.db</strong> aquí o haz clic para seleccionar</p>
+          <input type="file" id="restore-file-input" accept=".db" style="display:none;" onchange="handleRestoreFile(this.files[0])">
+        </div>
+        <div id="restore-file-info" style="display:none; margin-top:12px; padding:10px 14px; background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.3); border-radius:10px; color:#86efac; font-size:13px;"></div>
+        <div id="restore-progress" style="display:none; margin-top:12px;">
+          <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+            <div id="restore-progress-bar" style="height:100%; width:0%; background:linear-gradient(90deg,#D4A017,#F2C14E); border-radius:3px; transition:width 0.3s;"></div>
+          </div>
+          <p id="restore-progress-text" style="color:rgba(255,255,255,0.5); font-size:12px; margin:6px 0 0; text-align:center;"></p>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:18px;">
+          <button onclick="cerrarRestoreModal()" style="flex:1; padding:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:14px; font-weight:600; cursor:pointer;">Cancelar</button>
+          <button id="restore-btn-confirm" onclick="ejecutarRestore()" disabled style="flex:1; padding:12px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:10px; color:#0B1229; font-size:14px; font-weight:700; cursor:pointer; opacity:0.5;">Restaurar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+let restoreFile = null;
+
+function handleRestoreFile(file) {
+  if (!file) return;
+  if (!file.name.endsWith('.db')) {
+    toast('Solo se permiten archivos .db', 'error');
+    return;
+  }
+  restoreFile = file;
+  const info = document.getElementById('restore-file-info');
+  const size = file.size < 1024 * 1024
+    ? (file.size / 1024).toFixed(1) + ' KB'
+    : (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+  info.innerHTML = `📄 <strong>${file.name}</strong> (${size})`;
+  info.style.display = 'block';
+  document.getElementById('restore-btn-confirm').disabled = false;
+  document.getElementById('restore-btn-confirm').style.opacity = '1';
+}
+
+async function ejecutarRestore() {
+  if (!restoreFile) return;
+  if (!confirm('⚠️ ¿Estás SEGURO de restaurar? Se sobreescribirán todos los datos actuales.')) return;
+
+  const btn = document.getElementById('restore-btn-confirm');
+  const progress = document.getElementById('restore-progress');
+  const bar = document.getElementById('restore-progress-bar');
+  const text = document.getElementById('restore-progress-text');
+
+  btn.disabled = true;
+  btn.textContent = 'Restaurando...';
+  progress.style.display = 'block';
+  bar.style.width = '30%';
+  text.textContent = 'Subiendo archivo...';
+
+  try {
+    const fd = new FormData();
+    fd.append('backup', restoreFile);
+
+    bar.style.width = '60%';
+    text.textContent = 'Reemplazando base de datos...';
+
+    const res = await fetch('/api/restore', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('rifassyc_token') || '') },
+      body: fd
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al restaurar');
+
+    bar.style.width = '100%';
+    text.textContent = '✅ Restaurado correctamente. Recargando...';
+
+    setTimeout(() => { location.reload(); }, 1500);
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+    bar.style.width = '100%';
+    bar.style.background = '#ef4444';
+    text.textContent = '❌ ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Restaurar';
+  }
+}
+
+function cerrarRestoreModal() {
+  restoreFile = null;
+  document.getElementById('modal-root').innerHTML = '';
 }
 

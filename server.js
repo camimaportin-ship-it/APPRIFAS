@@ -364,6 +364,16 @@ const upload = multer({
   }
 });
 
+// Multer para subida de backup .db (en memoria, 50MB máx)
+const uploadDb = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.originalname.endsWith('.db')) cb(null, true);
+    else cb(new Error('Solo se permiten archivos .db'));
+  }
+});
+
 // -------------------------------- HELPERS ------------------------------------
 
 // Lectura de una rifa NO borrada (la papelera queda oculta del flujo normal).
@@ -2434,6 +2444,36 @@ app.get('/api/backup', (req, res) => {
   // Checkpoint de WAL para asegurar que todo esté escrito en el .db principal
   db.pragma('wal_checkpoint(FULL)');
   res.download(dbPath, `backup-rifas-${new Date().toISOString().slice(0, 10)}.db`);
+});
+
+// -------------------------------- RESTORE -----------------------------------
+
+app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
+
+  try {
+    // Checkpoint + cerrar conexión actual
+    db.pragma('wal_checkpoint(FULL)');
+    db.close();
+
+    // Reemplazar el archivo .db con el subido
+    fs.writeFileSync(dbPath, req.file.buffer);
+
+    // Reiniciar conexión
+    db = await initDB();
+    ensureSchema(db);
+
+    console.log('[RESTORE] Base de datos restaurada correctamente');
+    res.json({ ok: true, mensaje: 'Base de datos restaurada correctamente' });
+  } catch (err) {
+    console.error('[RESTORE] Error:', err.message);
+    // Intentar recuperar la conexión
+    try {
+      db = await initDB();
+      ensureSchema(db);
+    } catch (_) {}
+    res.status(500).json({ error: 'Error al restaurar: ' + err.message });
+  }
 });
 
 // -------------------------------- FALLBACK SPA -------------------------------
