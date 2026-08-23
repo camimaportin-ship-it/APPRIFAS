@@ -4162,7 +4162,7 @@ async function renderAdminDashboard(container) {
               </thead>
               <tbody>
                 ${d.rifas.map(r => {
-                  const total = r.max_participants || r.vendidos || 0;
+                  const total = r.cantidad_max_participantes || r.vendidos || 0;
                   const pct = fmtPct(r.vendidos, total);
                   const estadoCls = r.estado === 'activa' ? 'badge-pagado' : r.estado === 'sorteada' ? 'badge-borrador' : 'badge-cerrada';
                   return `<tr style="border-bottom:1px solid var(--line); cursor:pointer;" onclick="window.location.hash='#/rifas/${r.id}/resumen'">

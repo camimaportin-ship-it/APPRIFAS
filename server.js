@@ -936,7 +936,7 @@ app.get('/api/admin/dashboard', requireRole('super_admin', 'admin'), (req, res) 
 
     const rifas = db.prepare(`
       SELECT r.id, r.nombre, r.producto, r.estado, r.valor_boleta, r.modalidad_boleta,
-             r.fecha_sorteo, r.max_participants,
+             r.fecha_sorteo, r.cantidad_max_participantes,
              COUNT(part.id) as vendidos,
              SUM(CASE WHEN part.estado_pago='pagado' THEN 1 ELSE 0 END) as pagados,
              SUM(CASE WHEN part.estado_pago='pendiente' THEN 1 ELSE 0 END) as pendientes
