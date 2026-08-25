@@ -57,6 +57,21 @@ function authHeaders() {
   return state.authToken ? { 'Authorization': 'Bearer ' + state.authToken } : {};
 }
 
+// Descarga autenticada (envía el token) para evitar el 401 en backup/exports
+function descargarAutenticada(url, nombre) {
+  return fetch(url, { headers: authHeaders() })
+    .then(r => { if (!r.ok) throw new Error('Error ' + r.status); return r.blob(); })
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    });
+}
+
 async function verificarSesion() {
   if (!state.authToken) return false;
   try {
@@ -1320,10 +1335,10 @@ async function renderResumen(rifa, d) {
         </div>
         <img src="/api/rifas/${rifa.id}/qr" style="width:140px; border:1px solid var(--line); border-radius:10px; padding:8px;">
         <div class="flex gap-2 mt-4">
-          <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/exportar-excel">⬇️ Excel</a>
-          <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/exportar-csv">📄 CSV</a>
+          <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-excel','rifa-${rifa.id}.xlsx')">⬇️ Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-csv','rifa-${rifa.id}.csv')">📄 CSV</button>
           <button class="btn btn-outline btn-sm" onclick="exportarReportePDF(${rifa.id})">📋 PDF</button>
-          <a class="btn btn-outline btn-sm" href="/api/backup">💾 Backup .db</a>
+          <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/backup','backup-rifas.zip')">💾 Backup (.zip)</button>
           <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar .db</button>
         </div>
       </div>
@@ -4335,7 +4350,7 @@ async function renderAdminUsuarios(container) {
         <h3 style="margin:0 0 8px;">💾 Respaldo de datos</h3>
         <p class="text-sm text-ink-600" style="margin:0 0 16px;">Exporta o restaura la base de datos completa. Útil para migrar datos entre servidores o recuperar después de un despliegue.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <a class="btn btn-outline btn-sm" href="/api/backup">💾 Descargar backup .db</a>
+          <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/backup','backup-rifas.zip')">💾 Descargar backup (.zip)</button>
           <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup .db</button>
         </div>
       </div>

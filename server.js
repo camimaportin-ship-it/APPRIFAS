@@ -19,6 +19,8 @@ const whatsapp = require('./backend/whatsapp');
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const bcrypt = require('bcryptjs');
 const cryptoToken = require('crypto');
+const archiver = require('archiver');
+const unzipper = require('unzipper');
 
 let db;
 
@@ -369,8 +371,8 @@ const uploadDb = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.originalname.endsWith('.db')) cb(null, true);
-    else cb(new Error('Solo se permiten archivos .db'));
+    if (/\.(db|zip)$/i.test(file.originalname || '')) cb(null, true);
+    else cb(new Error('Solo se permiten archivos .db o .zip'));
   }
 });
 
@@ -2487,10 +2489,23 @@ app.get('/api/public/rifa/:id', (req, res) => {
 
 // -------------------------------- BACKUP ------------------------------------
 
-app.get('/api/backup', (req, res) => {
-  // Checkpoint de WAL para asegurar que todo esté escrito en el .db principal
-  db.pragma('wal_checkpoint(FULL)');
-  res.download(dbPath, `backup-rifas-${new Date().toISOString().slice(0, 10)}.db`);
+app.get('/api/backup', async (req, res) => {
+  try {
+    // Volcar lo último a disco antes de empaquetar
+    if (typeof db._save === 'function') db._save();
+    const fecha = new Date().toISOString().slice(0, 10);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    res.attachment(`backup-rifas-${fecha}.zip`);
+    archive.on('warning', (err) => { if (err.code !== 'ENOENT') console.warn('[BACKUP]', err); });
+    archive.on('error', (err) => console.error('[BACKUP]', err));
+    archive.pipe(res);
+    archive.append(fs.createReadStream(dbPath), { name: 'rifas.db' });
+    if (fs.existsSync(uploadsDir)) archive.directory(uploadsDir, 'uploads');
+    await archive.finalize();
+  } catch (err) {
+    console.error('[BACKUP]', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Error al generar el backup: ' + err.message });
+  }
 });
 
 // -------------------------------- RESTORE -----------------------------------
@@ -2498,13 +2513,40 @@ app.get('/api/backup', (req, res) => {
 app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
 
+  const esZip = /\.zip$/i.test(req.file.originalname || '') || (req.file.mimetype || '').includes('zip');
+  const tmpDir = path.join(__dirname, '.restore-tmp-' + Date.now());
+
   try {
-    // Checkpoint + cerrar conexión actual
-    db.pragma('wal_checkpoint(FULL)');
+    // Volcar y cerrar conexión actual
+    if (typeof db._save === 'function') db._save();
     db.close();
 
-    // Reemplazar el archivo .db con el subido
-    fs.writeFileSync(dbPath, req.file.buffer);
+    if (esZip) {
+      // Extraer el .zip (rifas.db + uploads/) en un directorio temporal
+      fs.mkdirSync(tmpDir, { recursive: true });
+      const tmpZip = path.join(tmpDir, 'backup.zip');
+      fs.writeFileSync(tmpZip, req.file.buffer);
+      await new Promise((resolve, reject) => {
+        fs.createReadStream(tmpZip)
+          .pipe(unzipper.Extract({ path: tmpDir }))
+          .on('close', resolve)
+          .on('error', reject);
+      });
+      const dbExtraido = path.join(tmpDir, 'rifas.db');
+      if (!fs.existsSync(dbExtraido)) throw new Error('El archivo .zip no contiene rifas.db');
+      // Reemplazar la base de datos
+      fs.copyFileSync(dbExtraido, dbPath);
+      // Volcar las imágenes/pósters sobre uploads/
+      const uploadsExtraido = path.join(tmpDir, 'uploads');
+      if (fs.existsSync(uploadsExtraido)) {
+        for (const f of fs.readdirSync(uploadsExtraido)) {
+          fs.copyFileSync(path.join(uploadsExtraido, f), path.join(uploadsDir, f));
+        }
+      }
+    } else {
+      // Respaldo clásico: solo el .db
+      fs.writeFileSync(dbPath, req.file.buffer);
+    }
 
     // Reiniciar conexión
     db = await initDB();
@@ -2520,6 +2562,8 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
       ensureSchema(db);
     } catch (_) {}
     res.status(500).json({ error: 'Error al restaurar: ' + err.message });
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
   }
 });
 
