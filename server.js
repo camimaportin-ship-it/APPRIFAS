@@ -1982,7 +1982,13 @@ let _fuentesRegistradas = false;
 function registrarFuentes() {
   if (_fuentesRegistradas) return;
   _fuentesRegistradas = true;
+  // Fuentes empaquetadas en el repo (funcionan en Windows y en Railway/Linux)
+  const dirFuentes = path.join(__dirname, 'fonts');
   const fuentes = [
+    [path.join(dirFuentes, 'SegoeUI-Bold.ttf'), 'Segoe UI Bold'],
+    [path.join(dirFuentes, 'SegoeUI.ttf'), 'Segoe UI'],
+    [path.join(dirFuentes, 'SegoeUI-Light.ttf'), 'Segoe UI Light'],
+    // Fallbacks de sistema (solo si existen en la máquina)
     ['C:\\Windows\\Fonts\\segoeuib.ttf', 'Segoe UI Bold'],
     ['C:\\Windows\\Fonts\\segoeui.ttf', 'Segoe UI'],
     ['C:\\Windows\\Fonts\\arialbd.ttf', 'Arial Bold'],
