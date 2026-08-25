@@ -215,7 +215,7 @@ table.tbl tr:hover td{background:var(--line-soft);}
 .legal-box{background:var(--amber-100); border:1px solid #FDE68A; color:#92400E; font-size:12.5px; padding:12px 14px; border-radius:var(--radius-sm); line-height:1.5;}
 
 /* ---------- Utilidades ---------- */
-.flex{display:flex;} .items-center{align-items:center;} .justify-between{justify-content:space-between;}
+.flex{display:flex; flex-wrap:wrap;} .items-center{align-items:center;} .justify-between{justify-content:space-between;}
 .gap-2{gap:8px;} .gap-3{gap:12px;} .gap-4{gap:16px;}
 .mt-2{margin-top:8px;} .mt-3{margin-top:12px;} .mt-4{margin-top:16px;} .mt-6{margin-top:24px;}
 .mb-2{margin-bottom:8px;} .mb-3{margin-bottom:12px;} .mb-4{margin-bottom:16px;}
@@ -667,7 +667,7 @@ html{overflow-x:hidden;}
 body{overflow-x:hidden;}
 
 /* ---- Contenedor de contenido: siempre con max-width y padding responsivo ---- */
-.content{padding:28px; max-width:1200px; margin:0 auto; width:100%; box-sizing:border-box; flex:1; overflow-y:auto;}
+.content{padding:clamp(1rem, 4vw, 1.75rem); max-width:1200px; margin:0 auto; width:100%; box-sizing:border-box; flex:1; overflow-y:auto;}
 
 /* ---- Topbar responsive ---- */
 .topbar{padding:14px 20px; gap:10px;}
@@ -682,7 +682,9 @@ table.tbl th{white-space:nowrap;}
 /* ---- Botones: evitar desbordamiento ---- */
 .btn-group{display:flex; flex-wrap:wrap; gap:8px;}
 .btn-group .btn{flex:1 1 auto; min-width:0; justify-content:center;}
-.btn{white-space:nowrap; flex-shrink:0;}
+/* Sin flex-shrink:0 ni nowrap forzado: el boton se ajusta al contenedor y
+   su texto puede envolver antes de causar scroll horizontal en pantallas chicas */
+.btn{max-width:100%; min-height:44px;}
 .btn-block{width:100%; justify-content:center;}
 
 /* ---- Formularios: campos apilados en móvil ---- */

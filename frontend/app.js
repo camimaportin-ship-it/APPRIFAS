@@ -1334,7 +1334,7 @@ async function renderResumen(rifa, d) {
           <a class="btn btn-outline btn-sm" target="_blank" href="/public/rifa/${rifa.id}">Abrir</a>
         </div>
         <img src="/api/rifas/${rifa.id}/qr" style="width:140px; border:1px solid var(--line); border-radius:10px; padding:8px;">
-        <div class="flex gap-2 mt-4">
+        <div class="btn-group mt-4">
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-excel','rifa-${rifa.id}.xlsx')">⬇️ Excel</button>
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-csv','rifa-${rifa.id}.csv')">📄 CSV</button>
           <button class="btn btn-outline btn-sm" onclick="exportarReportePDF(${rifa.id})">📋 PDF</button>
@@ -1350,7 +1350,7 @@ async function renderResumen(rifa, d) {
           <h3 style="margin:0;">🖼️ Poster promocional 2160×2160</h3>
           <p class="text-sm text-ink-600 mt-1">Se genera con foto del producto, título, precio, fecha, QR de la rifa y logo. Se guarda en <code>Raffle.posterImageUrl</code>.</p>
         </div>
-        <div class="flex gap-2">
+        <div class="btn-group">
           <button class="btn btn-gold btn-sm" onclick="generarPoster(${rifa.id})" id="btn-generar-poster">🎨 Generar Poster</button>
           <a class="btn btn-outline btn-sm" id="btn-descargar-poster" style="display:none;" href="#" download="poster-rifa-${rifa.id}.png">⬇️ Descargar PNG</a>
         </div>
@@ -2287,24 +2287,24 @@ async function renderPublicidadTab(rifa, d, box) {
       <div class="card card-pad text-center">
         <h3 class="mb-3">Post cuadrado <span class="text-xs text-ink-600" id="lbl-post-res">2160×2160</span></h3>
         <canvas id="canvas-post" width="1080" height="1080" style="width:100%; max-width:320px; border-radius:12px; box-shadow:var(--shadow-md);"></canvas>
-        <div class="flex gap-2 justify-between mt-3">
-          <button class="btn btn-outline btn-sm w-full" onclick="previsualizarPost()">👁️ Previsualizar</button>
-          <button class="btn btn-gold btn-sm w-full" onclick="descargarPost()">⬇️ Descargar</button>
+        <div class="btn-group mt-3">
+          <button class="btn btn-outline btn-sm" onclick="previsualizarPost()">👁️ Previsualizar</button>
+          <button class="btn btn-gold btn-sm" onclick="descargarPost()">⬇️ Descargar</button>
         </div>
       </div>
       <div class="card card-pad text-center">
         <h3 class="mb-3">Historia vertical <span class="text-xs text-ink-600" id="lbl-historia-res">2160×3840</span></h3>
         <canvas id="canvas-historia" width="1080" height="1920" style="width:100%; max-width:200px; border-radius:12px; box-shadow:var(--shadow-md);"></canvas>
-        <div class="flex gap-2 justify-between mt-3">
-          <button class="btn btn-outline btn-sm w-full" onclick="previsualizarHistoria()">👁️ Previsualizar</button>
-          <button class="btn btn-gold btn-sm w-full" onclick="descargarHistoria()">⬇️ Descargar</button>
+        <div class="btn-group mt-3">
+          <button class="btn btn-outline btn-sm" onclick="previsualizarHistoria()">👁️ Previsualizar</button>
+          <button class="btn btn-gold btn-sm" onclick="descargarHistoria()">⬇️ Descargar</button>
         </div>
       </div>
     </div>
     <div class="card card-pad mt-4 text-center">
       <p class="text-sm text-ink-600 mb-3">También puedes generar el <strong>poster cuadrado en el servidor</strong> y dejarlo guardado como imagen oficial de la rifa (se muestra en el listado y se usa en los enlaces).</p>
-      <button class="btn btn-primary" id="btn-generar-poster" onclick="generarPoster(${rifa.id})">🖼️ Generar poster oficial (2160×2160)</button>
-      <a id="btn-descargar-poster" href="#" download style="display:none;" class="btn btn-gold">⬇️ Descargar poster</a>
+      <button class="btn btn-primary btn-block" id="btn-generar-poster" onclick="generarPoster(${rifa.id})">🖼️ Generar poster oficial (2160×2160)</button>
+      <a id="btn-descargar-poster" href="#" download style="display:none;" class="btn btn-gold btn-block">⬇️ Descargar poster</a>
       <div id="card-poster" class="mt-3"></div>
     </div>`;
 
