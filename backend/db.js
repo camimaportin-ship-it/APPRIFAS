@@ -376,12 +376,18 @@ CREATE INDEX IF NOT EXISTS idx_sorteos_aud_fecha ON sorteos_auditoria(fecha);
     { usuario: 'sairaosorio78', nombre: 'Saira Admin', password: 'Rifas01234' }
   ];
   const bcrypt = require('bcryptjs');
+  // Evitar duplicados de usuario: el restore/arranque puede reinsertar las semillas.
+  // Se conserva el registro con menor id por cada usuario.
+  db.exec(`DELETE FROM usuarios WHERE id NOT IN (SELECT MIN(id) FROM usuarios GROUP BY usuario)`);
   const insertUser = db.prepare(
-    `INSERT OR IGNORE INTO usuarios (usuario, nombre, password_hash, rol) VALUES (?, ?, ?, 'super_admin')`
+    `INSERT INTO usuarios (usuario, nombre, password_hash, rol) VALUES (?, ?, ?, 'super_admin')`
   );
   for (const a of admins) {
-    const hash = bcrypt.hashSync(a.password, 10);
-    insertUser.run(a.usuario, a.nombre, hash);
+    const existe = db.prepare('SELECT 1 FROM usuarios WHERE usuario = ?').get(a.usuario);
+    if (!existe) {
+      const hash = bcrypt.hashSync(a.password, 10);
+      insertUser.run(a.usuario, a.nombre, hash);
+    }
   }
 
   db.exec(`

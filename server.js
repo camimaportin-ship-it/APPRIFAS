@@ -2062,41 +2062,14 @@ app.post('/api/rifas/:id/generar-poster', async (req, res) => {
       return hora ? txt + ' · ' + hora : txt;
     };
 
-    // Fondo promocional: degradado navy, halo dorado, rayos, destellos y marco
+    // Fondo: degradado azul profundo elegante + halo dorado suave (sin rayos ni destellos)
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#0B1229'); grad.addColorStop(0.55, '#16213F'); grad.addColorStop(1, '#0C1330');
+    grad.addColorStop(0, '#0F1B33'); grad.addColorStop(0.55, '#15243F'); grad.addColorStop(1, '#0B1322');
     ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
 
-    const glow = ctx.createRadialGradient(W / 2, -80, 20, W / 2, -80, H * 0.55);
-    glow.addColorStop(0, 'rgba(212,160,23,0.30)'); glow.addColorStop(1, 'rgba(212,160,23,0)');
+    const glow = ctx.createRadialGradient(W / 2, -120, 20, W / 2, -120, H * 0.7);
+    glow.addColorStop(0, 'rgba(212,160,23,0.18)'); glow.addColorStop(1, 'rgba(212,160,23,0)');
     ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
-
-    // Rayos diagonales desde el borde superior
-    ctx.save();
-    ctx.globalAlpha = 0.1; ctx.fillStyle = '#E8B923';
-    const cx = W / 2, cy = -60;
-    for (let i = 0; i < 16; i++) {
-      const ang = (i / 16) * Math.PI * 2 + 0.4;
-      ctx.save();
-      ctx.translate(cx, cy); ctx.rotate(ang);
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(H, -20); ctx.lineTo(H, 20); ctx.closePath();
-      ctx.fill(); ctx.restore();
-    }
-    ctx.restore();
-
-    // Destellos de 8 puntas
-    const estrellas = [[64,130,14],[W-90,180,11],[120,360,8],[W-120,390,13],[200,580,9],[W-170,575,8],[90,720,10],[W-95,715,14],[W/2,140,20]];
-    for (const [sx, sy, sr] of estrellas) {
-      ctx.save();
-      ctx.globalAlpha = 0.55; ctx.fillStyle = '#E8B923';
-      ctx.beginPath();
-      for (let k = 0; k < 8; k++) {
-        const a = (k * Math.PI) / 4, r = k % 2 === 0 ? sr : sr * 0.3;
-        const px = sx + Math.cos(a) * r, py = sy + Math.sin(a) * r;
-        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.closePath(); ctx.fill(); ctx.restore();
-    }
 
     // Marco dorado interior + franja superior
     ctx.save();
@@ -2148,7 +2121,7 @@ app.post('/api/rifas/:id/generar-poster', async (req, res) => {
       if (archivoProducto && fs.existsSync(archivoProducto)) {
         try {
           const img = await loadImage(archivoProducto);
-          const ratio = Math.max(contentW / img.width, cardH / img.height);
+          const ratio = Math.min(contentW / img.width, cardH / img.height);
           const iw = img.width * ratio, ih = img.height * ratio;
           ctx.drawImage(img, M + (contentW - iw) / 2, y + (cardH - ih) / 2, iw, ih);
           tieneImg = true;

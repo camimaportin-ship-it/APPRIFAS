@@ -126,26 +126,17 @@ class GeneradorImagen {
 
   static _fondo(ctx, w, h) {
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#0B1229');
-    grad.addColorStop(0.55, '#16213F');
-    grad.addColorStop(1, '#0C1330');
+    grad.addColorStop(0, '#0F1B33');
+    grad.addColorStop(0.55, '#15243F');
+    grad.addColorStop(1, '#0B1322');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
-    const glow = ctx.createRadialGradient(w / 2, -80, 20, w / 2, -80, h * 0.55);
-    glow.addColorStop(0, 'rgba(212,160,23,0.28)');
+    const glow = ctx.createRadialGradient(w / 2, -120, 20, w / 2, -120, h * 0.7);
+    glow.addColorStop(0, 'rgba(212,160,23,0.18)');
     glow.addColorStop(1, 'rgba(212,160,23,0)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, w, h);
-
-    GeneradorImagen._rayos(ctx, w, h);
-
-    const estrellas = [
-      [64, 130, 14], [w - 90, 180, 11], [120, 360, 8],
-      [w - 120, 390, 13], [200, 580, 9], [w - 170, 575, 8],
-      [90, 720, 10], [w - 95, 715, 14], [w / 2, 140, 20]
-    ];
-    for (const [x, y, r] of estrellas) GeneradorImagen._destello(ctx, x, y, r);
 
     ctx.save();
     GeneradorImagen._rr(ctx, 18, 18, w - 36, h - 36, 30);
@@ -207,7 +198,7 @@ class GeneradorImagen {
     ctx.stroke();
     ctx.clip();
     if (img) {
-      const ratio = Math.max(w / img.width, h / img.height);
+      const ratio = Math.min(w / img.width, h / img.height);
       const iw = img.width * ratio, ih = img.height * ratio;
       ctx.drawImage(img, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih);
     } else {
