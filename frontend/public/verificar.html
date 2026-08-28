@@ -27,6 +27,13 @@
     .badge { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
     .badge-sorteada { background: #FBF0D2; color: #946200; }
     .badge-activa { background: #d1fae5; color: #059669; }
+    .badge-agotada { background: #fee2e2; color: #dc2626; }
+    .info-box { background: rgba(255,255,255,.06); border-radius: 10px; padding: 14px 18px; margin: 14px 0; font-size: 14px; color: #fff; text-align: left; }
+    .info-box .label { color: #98A2B3; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .info-box .value { font-weight: 700; font-size: 16px; }
+    .info-box .value.gold { color: #D4A017; }
+    .info-box .value.green { color: #22c55e; }
+    .info-box .value.red { color: #ef4444; }
   </style>
 </head>
 <body>
@@ -46,14 +53,59 @@
         const res = await fetch('/api/public/rifa/' + id);
         if (!res.ok) throw new Error('Rifa no encontrada');
         const data = await res.json();
-        const { rifa, ganadores, empresa } = data;
+        const { rifa, numeros, boletas, ganadores, empresa } = data;
         const g = ganadores.length ? ganadores[0] : null;
+
+        // Calcular boletas disponibles / vendidas
+        const total = rifa.cantidad_max_participantes || 0;
+        let vendidos = 0;
+        if (boletas.length) {
+          vendidos = boletas.filter(b => b.estado !== 'libre').length;
+        } else {
+          vendidos = numeros.filter(n => n.estado !== 'libre').length;
+        }
+        const disponibles = total - vendidos;
+        const agotado = disponibles <= 0 && total > 0;
+        const porcentaje = total > 0 ? Math.round((vendidos / total) * 100) : 0;
+
+        // Fecha del sorteo
+        let fechaSorteo = '';
+        if (rifa.fecha_sorteo) {
+          const f = new Date(rifa.fecha_sorteo + (rifa.hora_sorteo ? 'T' + rifa.hora_sorteo : 'T19:00'));
+          fechaSorteo = f.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          if (rifa.hora_sorteo) fechaSorteo += ' a las ' + rifa.hora_sorteo;
+        }
+
+        // Badge de estado
+        let badgeCls = 'badge-activa';
+        let badgeText = 'Activa';
+        if (rifa.estado === 'sorteada') { badgeCls = 'badge-sorteada'; badgeText = 'Sorteada'; }
+        else if (agotado) { badgeCls = 'badge-agotada'; badgeText = 'Agotada'; }
+
         const html = `
           <div class="logo">🎲 Rifas SYC</div>
           <div class="subtitle">Sistema de verificación de sorteos</div>
           <div class="rifa-name">${esc(rifa.nombre)}</div>
-          <div class="rifa-producto">${esc(rifa.producto || '')}</div>
-          <span class="badge badge-${rifa.estado}">${rifa.estado === 'sorteada' ? 'Sorteada' : 'Activa'}</span>
+          <div class="rifa-producto">${esc(rifa.producto || '')} · $${Number(rifa.valor_boleta || 0).toLocaleString('es-CO')}</div>
+          <span class="badge ${badgeCls}">${badgeText}</span>
+
+          <div class="info-box">
+            <div class="label">📅 Fecha programada del sorteo</div>
+            <div class="value gold">${fechaSorteo || 'Sin fecha definida'}</div>
+          </div>
+
+          <div class="info-box">
+            <div class="label">🎟️ Boletas</div>
+            ${total > 0
+              ? `<div class="value ${agotado ? 'red' : 'green'}">${agotado ? 'Agotadas' : disponibles + ' disponibles'}</div>
+                 <div style="margin-top:6px; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                   <div style="height:100%; width:${porcentaje}%; background:${agotado ? '#ef4444' : '#22c55e'}; border-radius:3px;"></div>
+                 </div>
+                 <div style="margin-top:4px; font-size:12px; color:#98A2B3;">${vendidos} vendidas de ${total} (${porcentaje}%)</div>`
+              : `<div class="value" style="color:#98A2B3;">Información no disponible</div>`
+            }
+          </div>
+
           ${rifa.estado === 'sorteada' && g ? `
             <div class="winner-box">
               <div class="winner-label">🏆 Ganador</div>

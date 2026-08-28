@@ -742,7 +742,7 @@ async function vistaLogs() {
     }
     box.innerHTML = `<div class="card card-pad"><div style="overflow-x:auto;">
       <table class="tbl">
-        <thead><tr><th>Fecha</th><th>Tipo</th><th>Rifa</th><th>Detalle</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Rifa</th><th>Detalle</th>${state.usuario?.rol === 'super_admin' ? '<th>Usuario</th>' : ''}</tr></thead>
         <tbody>
           ${logs.map(l => `
             <tr>
@@ -750,6 +750,7 @@ async function vistaLogs() {
               <td style="white-space:nowrap;">${badgeLog(l.accion)}</td>
               <td>${l.rifa_nombre ? `<a class="text-link" href="#/rifas/${l.rifa_id}">${escapeHtml(l.rifa_nombre)}</a> <span class="text-xs text-ink-600">#${l.rifa_id}</span>` : '<span class="text-xs text-ink-600">(rifa eliminada)</span>'}</td>
               <td class="text-sm">${escapeHtml(l.detalle || '')}</td>
+              ${state.usuario?.rol === 'super_admin' ? `<td class="text-sm">${escapeHtml(l.usuario || '—')}</td>` : ''}
             </tr>`).join('')}
         </tbody>
       </table></div></div>`;
@@ -1339,7 +1340,7 @@ async function renderResumen(rifa, d) {
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-csv','rifa-${rifa.id}.csv')">📄 CSV</button>
           <button class="btn btn-outline btn-sm" onclick="exportarReportePDF(${rifa.id})">📋 PDF</button>
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/backup','backup-rifas.zip')">💾 Backup (.zip)</button>
-          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar .db</button>
+          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup</button>
         </div>
       </div>
     </div>
@@ -1395,6 +1396,7 @@ async function renderParticipantesTab(rifa, box) {
       <div class="flex gap-2">
         <button class="btn btn-primary btn-sm" onclick="modalRegistroIndividual(${rifa.id})">➕ Registro individual</button>
         <button class="btn btn-outline btn-sm" onclick="modalRegistroMasivo(${rifa.id})">📋 Registro masivo</button>
+        <button class="btn btn-outline btn-sm" onclick="modalRegistroMasivoSeleccion(${rifa.id})">🔢 Seleccionar números</button>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="liberarVencidos(${rifa.id})">🔓 Liberar vencidos ahora</button>
     </div>
@@ -1858,7 +1860,7 @@ function modalRegistroIndividual(rifaId, preseleccion) {
     <form id="form-individual" class="modal__body">
       <div class="grid-2">
         <div class="field"><label>Nombre completo <em class="req">*</em></label><input class="input" name="nombre" required placeholder="Ej: Juan Pérez" maxlength="120"></div>
-        <div class="field"><label>Teléfono <em class="req">*</em></label><input class="input" name="telefono" required inputmode="tel" placeholder="3001234567" maxlength="20"></div>
+        <div class="field"><label>Teléfono</label><input class="input" name="telefono" inputmode="tel" placeholder="3001234567" maxlength="20"></div>
       </div>
       <div class="field"><label>Cédula (opcional)</label><input class="input" name="cedula" inputmode="numeric" placeholder="Opcional — para no repetir compras"></div>
 
@@ -1995,7 +1997,7 @@ function modalRegistroChance(rifaId, preseleccion) {
     <form id="form-individual-chance" class="modal__body">
       <div class="grid-2">
         <div class="field"><label>Nombre completo <em class="req">*</em></label><input class="input" name="nombre" required placeholder="Ej: Juan Pérez" maxlength="120"></div>
-        <div class="field"><label>Teléfono <em class="req">*</em></label><input class="input" name="telefono" required inputmode="tel" placeholder="3001234567" maxlength="20"></div>
+        <div class="field"><label>Teléfono</label><input class="input" name="telefono" inputmode="tel" placeholder="3001234567" maxlength="20"></div>
       </div>
       <div class="field"><label>Cédula (opcional)</label><input class="input" name="cedula" inputmode="numeric" placeholder="Opcional — para no repetir compras"></div>
 
@@ -2101,6 +2103,143 @@ async function enviarRegistroMasivo(rifaId) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+// --- Registro masivo con selección manual de números ---
+
+async function modalRegistroMasivoSeleccion(rifaId) {
+  abrirModal(`
+    <div class="modal__header"><h3>Cargando números...</h3></div>
+    <div class="modal__body"><div class="empty-state"><div class="icon">⏳</div><p>Obteniendo números disponibles...</p></div></div>
+  `);
+  try {
+    const datos = await api('/rifas/' + rifaId + '/numeros');
+    const rifa = await api('/rifas/' + rifaId);
+    state._seleccionNumeros = {
+      rifaId, rifa,
+      numeros: Array.isArray(datos) ? datos : (datos.numeros || []),
+      seleccion: [],
+      registrados: 0
+    };
+    _renderModalSeleccion();
+  } catch (err) {
+    cerrarModal();
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+function _renderModalSeleccion() {
+  const s = state._seleccionNumeros;
+  if (!s) return;
+  const libres = s.numeros.filter(n => n.estado === 'libre');
+  const seleccionados = s.seleccion;
+
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div style="position:fixed; inset:0; z-index:90; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:16px;">
+      <div style="width:100%; max-width:700px; max-height:90vh; background:#16213F; border:1px solid #22315A; border-radius:18px; display:flex; flex-direction:column; overflow:hidden;">
+        <div style="padding:20px 24px 12px; border-bottom:1px solid var(--line);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;">🔢 Seleccionar números — ${escapeHtml(s.rifa.nombre)}</h3>
+            <button class="btn btn-ghost btn-sm" onclick="state._seleccionNumeros=null; cerrarModal();">✕</button>
+          </div>
+          <p class="text-sm text-ink-600" style="margin:4px 0 0;">${libres.length} números disponibles · ${seleccionados.length} seleccionados · ${s.registrados} registrados</p>
+        </div>
+
+        <div style="display:flex; flex:1; overflow:hidden;">
+          <!-- Panel izquierdo: grilla de números -->
+          <div style="flex:1; overflow-y:auto; padding:16px; border-right:1px solid var(--line);">
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+              ${libres.map(n => {
+                const sel = seleccionados.includes(n.numero);
+                return `<button type="button" onclick="_toggleNumSeleccion(${n.numero})"
+                  style="width:44px; height:36px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'};">
+                  ${fmtNum(s.rifa, n.numero)}
+                </button>`;
+              }).join('')}
+              ${libres.length === 0 ? '<p class="text-sm text-ink-600">No hay números disponibles</p>' : ''}
+            </div>
+          </div>
+
+          <!-- Panel derecho: formulario + números seleccionados -->
+          <div style="width:280px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <p style="font-weight:600; font-size:13px; margin:0 0 8px;">Números seleccionados</p>
+              <div style="display:flex; flex-wrap:wrap; gap:4px; min-height:32px;">
+                ${seleccionados.length === 0
+                  ? '<span class="text-xs text-ink-600">Haz clic en un número para seleccionarlo</span>'
+                  : seleccionados.map(n => `<span style="padding:4px 8px; background:rgba(212,160,23,0.2); border:1px solid #D4A017; border-radius:6px; font-size:12px; font-weight:600; color:#F2C14E;">${fmtNum(s.rifa, n)}</span>`).join('')
+                }
+              </div>
+            </div>
+
+            <div style="border-top:1px solid var(--line); padding-top:12px;">
+              <p style="font-weight:600; font-size:13px; margin:0 0 8px;">Datos del participante</p>
+              <div style="margin-bottom:8px;">
+                <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Nombre *</label>
+                <input id="sel-nombre" class="input" placeholder="Nombre completo" maxlength="120" style="font-size:13px;">
+              </div>
+              <div style="margin-bottom:8px;">
+                <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Teléfono</label>
+                <input id="sel-telefono" class="input" placeholder="Opcional" inputmode="tel" maxlength="20" style="font-size:13px;">
+              </div>
+              <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Cédula</label>
+                <input id="sel-cedula" class="input" placeholder="Opcional" inputmode="numeric" style="font-size:13px;">
+              </div>
+              <button class="btn btn-gold btn-sm" style="width:100%;" onclick="_registrarDesdeSeleccion()"
+                ${seleccionados.length === 0 ? 'disabled style="width:100%; opacity:0.5;"' : ''}>
+                Registrar participante (${seleccionados.length} número${seleccionados.length !== 1 ? 's' : ''})
+              </button>
+            </div>
+
+            <div style="margin-top:auto; padding-top:12px; border-top:1px solid var(--line); display:flex; gap:6px;">
+              <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="state._seleccionNumeros=null; cerrarModal();">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _toggleNumSeleccion(numero) {
+  const s = state._seleccionNumeros;
+  if (!s) return;
+  const idx = s.seleccion.indexOf(numero);
+  if (idx >= 0) s.seleccion.splice(idx, 1);
+  else s.seleccion.push(numero);
+  _renderModalSeleccion();
+}
+
+async function _registrarDesdeSeleccion() {
+  const s = state._seleccionNumeros;
+  if (!s || s.seleccion.length === 0) return;
+  const nombre = (document.getElementById('sel-nombre')?.value || '').trim();
+  if (!nombre) { toast('El nombre es obligatorio', 'error'); return; }
+  const telefono = (document.getElementById('sel-telefono')?.value || '').trim();
+  const cedula = (document.getElementById('sel-cedula')?.value || '').trim();
+
+  try {
+    for (const num of s.seleccion) {
+      await api('/rifas/' + s.rifaId + '/participantes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, telefono, cedula, numero: num })
+      });
+      const idx = s.numeros.findIndex(n => n.numero === num);
+      if (idx >= 0) s.numeros[idx].estado = 'vendido';
+    }
+    s.registrados += s.seleccion.length;
+    const count = s.seleccion.length;
+    s.seleccion = [];
+    document.getElementById('sel-nombre').value = '';
+    document.getElementById('sel-telefono').value = '';
+    document.getElementById('sel-cedula').value = '';
+    toast(`✅ ${count} participante(s) registrado(s)`);
+    _renderModalSeleccion();
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
 async function cambiarEstadoPago(participanteId, estado, rifaId) {
   try {
     await api('/participantes/' + participanteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado_pago: estado }) });
@@ -2116,7 +2255,7 @@ function modalEditarParticipante(rifaId, p) {
       <p class="text-sm text-ink-600 mb-3">Boleta: <strong class="mono">${escapeHtml(p.numeros.join(', '))}</strong></p>
       <div class="grid-2">
         <div class="field"><label>Nombre completo <em class="req">*</em></label><input class="input" name="nombre" required value="${escapeHtml(p.nombre)}" maxlength="120"></div>
-        <div class="field"><label>Teléfono <em class="req">*</em></label><input class="input" name="telefono" required inputmode="tel" value="${escapeHtml(p.telefono || '')}" maxlength="20"></div>
+        <div class="field"><label>Teléfono</label><input class="input" name="telefono" inputmode="tel" value="${escapeHtml(p.telefono || '')}" maxlength="20"></div>
       </div>
       <div class="field"><label>Cédula (opcional)</label><input class="input" name="cedula" inputmode="numeric" value="${escapeHtml(p.cedula || '')}"></div>
       <div class="field">
@@ -4351,7 +4490,7 @@ async function renderAdminUsuarios(container) {
         <p class="text-sm text-ink-600" style="margin:0 0 16px;">Exporta o restaura la base de datos completa. Útil para migrar datos entre servidores o recuperar después de un despliegue.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/backup','backup-rifas.zip')">💾 Descargar backup (.zip)</button>
-          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup .db</button>
+          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup</button>
         </div>
       </div>
       ` : ''}
@@ -4538,13 +4677,13 @@ function abrirRestoreModal() {
     <div style="position:fixed; inset:0; z-index:90; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:16px;" onclick="if(event.target===this)cerrarRestoreModal()">
       <div style="width:100%; max-width:440px; background:#16213F; border:1px solid #22315A; border-radius:18px; padding:28px 26px;">
         <h3 style="color:#fff; font-size:20px; font-weight:800; margin-bottom:4px;">📂 Restaurar base de datos</h3>
-        <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:16px;">Sube un archivo <code>.db</code> exportado desde esta app. Se reemplazará la base de datos actual.</p>
+        <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:16px;">Sube un archivo <code>.zip</code> (backup completo con imágenes) o <code>.db</code> (solo base de datos).</p>
         <div style="padding:16px; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:10px; margin-bottom:16px;">
           <p style="color:#fca5a5; font-size:13px; margin:0;">⚠️ <strong>Atención:</strong> Esta acción sobreescribirá TODOS los datos actuales. Se cerrarán las sesiones activas. Se recomienda hacer un backup primero.</p>
         </div>
         <div id="restore-drop-zone" style="border:2px dashed rgba(255,255,255,0.2); border-radius:12px; padding:32px 16px; text-align:center; cursor:pointer; transition:border-color 0.2s;" onclick="document.getElementById('restore-file-input').click()" ondragover="event.preventDefault(); this.style.borderColor='#D4A017'" ondragleave="this.style.borderColor='rgba(255,255,255,0.2)'" ondrop="event.preventDefault(); this.style.borderColor='rgba(255,255,255,0.2)'; handleRestoreFile(event.dataTransfer.files[0])">
-          <p style="color:rgba(255,255,255,0.6); font-size:14px; margin:0;">Arrastra un archivo <strong>.db</strong> aquí o haz clic para seleccionar</p>
-          <input type="file" id="restore-file-input" accept=".db" style="display:none;" onchange="handleRestoreFile(this.files[0])">
+          <p style="color:rgba(255,255,255,0.6); font-size:14px; margin:0;">Arrastra un archivo <strong>.zip</strong> o <strong>.db</strong> aquí</p>
+          <input type="file" id="restore-file-input" accept=".db,.zip" style="display:none;" onchange="handleRestoreFile(this.files[0])">
         </div>
         <div id="restore-file-info" style="display:none; margin-top:12px; padding:10px 14px; background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.3); border-radius:10px; color:#86efac; font-size:13px;"></div>
         <div id="restore-progress" style="display:none; margin-top:12px;">
@@ -4565,8 +4704,8 @@ let restoreFile = null;
 
 function handleRestoreFile(file) {
   if (!file) return;
-  if (!file.name.endsWith('.db')) {
-    toast('Solo se permiten archivos .db', 'error');
+  if (!file.name.endsWith('.db') && !file.name.endsWith('.zip')) {
+    toast('Solo se permiten archivos .db o .zip', 'error');
     return;
   }
   restoreFile = file;

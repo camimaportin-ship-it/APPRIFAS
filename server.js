@@ -111,7 +111,7 @@ app.post('/api/auth/login', (req, res) => {
       rol: user.rol,
       exp: Date.now() + duracion
     });
-    registrarLog('login', 'usuario', user.id, user.usuario, `Login exitoso desde sesión ${token.slice(0, 8)}...`);
+    registrarLog('login', 'usuario', user.id, user.usuario, `Login exitoso desde sesión ${token.slice(0, 8)}...`, user.usuario);
     res.json({ ok: true, token, usuario: user.usuario, nombre: user.nombre, rol: user.rol, expiraEn: duracion });
   } catch (err) {
     console.error('[AUTH LOGIN]', err);
@@ -233,7 +233,7 @@ app.post('/api/usuarios', requireRole('super_admin', 'admin'), (req, res) => {
     const hash = bcrypt.hashSync(password, 10);
     const info = db.prepare('INSERT INTO usuarios (nombre, usuario, email, password_hash, rol) VALUES (?,?,?,?,?)')
       .run(nombre, usuario, email || null, hash, rolFinal);
-    registrarLog('crear-usuario', 'usuario', info.lastInsertRowid, usuario, `Usuario "${usuario}" creado con rol ${rolFinal}`);
+    registrarLog('crear-usuario', 'usuario', info.lastInsertRowid, usuario, `Usuario "${usuario}" creado con rol ${rolFinal}`, req.usuario.usuario);
     res.status(201).json({ ok: true, id: info.lastInsertRowid, usuario, rol: rolFinal });
   } catch (err) {
     console.error('[USUARIOS CREAR]', err);
@@ -257,7 +257,7 @@ app.put('/api/usuarios/:id', requireRole('super_admin', 'admin'), (req, res) => 
       if (password.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
       db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), target.id);
     }
-    registrarLog('editar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" actualizado`);
+    registrarLog('editar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" actualizado`, req.usuario.usuario);
     res.json({ ok: true });
   } catch (err) {
     console.error('[USUARIOS EDITAR]', err);
@@ -276,7 +276,7 @@ app.put('/api/usuarios/:id/rol', requireRole('super_admin'), (req, res) => {
       return res.status(400).json({ error: 'Rol inválido' });
     }
     db.prepare('UPDATE usuarios SET rol = ? WHERE id = ?').run(rol, target.id);
-    registrarLog('cambiar-rol', 'usuario', target.id, target.usuario, `Rol cambiado de "${target.rol}" a "${rol}"`);
+    registrarLog('cambiar-rol', 'usuario', target.id, target.usuario, `Rol cambiado de "${target.rol}" a "${rol}"`, req.usuario.usuario);
     // Cerrar sesiones del usuario si su rol bajó de permisos
     if (rol === 'vendedor') {
       for (const [token, s] of sesionesActivas) {
@@ -302,7 +302,7 @@ app.delete('/api/usuarios/:id', requireRole('super_admin'), (req, res) => {
     for (const [token, s] of sesionesActivas) {
       if (s.usuario === target.usuario) sesionesActivas.delete(token);
     }
-    registrarLog('eliminar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" eliminado`);
+    registrarLog('eliminar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" eliminado`, req.usuario.usuario);
     res.json({ ok: true });
   } catch (err) {
     console.error('[USUARIOS ELIMINAR]', err);
@@ -338,7 +338,7 @@ app.delete('/api/sesiones/:tokenPrefix', requireRole('super_admin', 'admin'), (r
   let cerrada = false;
   for (const [token, s] of sesionesActivas) {
     if (token.startsWith(prefix) && token !== currentToken) {
-      registrarLog('cerrar-sesion-remota', 'sistema', null, s.usuario, `Sesión de "${s.usuario}" cerrada remotamente por ${req.usuario.usuario}`);
+      registrarLog('cerrar-sesion-remota', 'sistema', null, s.usuario, `Sesión de "${s.usuario}" cerrada remotamente por ${req.usuario.usuario}`, req.usuario.usuario);
       sesionesActivas.delete(token);
       cerrada = true;
       break;
@@ -679,19 +679,19 @@ function estadoGrupo(rifa, grupo) {
 }
 
 // Registra una fila en el historial de la rifa (auditoría / transparencia)
-function registrarHistorial(rifaId, accion, detalle = '') {
-  db.prepare('INSERT INTO historial (rifa_id, accion, detalle) VALUES (?,?,?)')
-    .run(rifaId, accion, detalle);
+function registrarHistorial(rifaId, accion, detalle = '', usuario = null) {
+  db.prepare('INSERT INTO historial (rifa_id, accion, detalle, usuario) VALUES (?,?,?,?)')
+    .run(rifaId, accion, detalle, usuario || null);
   // Espejo en el log global de auditoría (conserva el nombre de la rifa aunque se purgue)
   const rifa = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
-  db.prepare('INSERT INTO logs (accion, entidad, rifa_id, rifa_nombre, detalle) VALUES (?,?,?,?,?)')
-    .run(accion, 'rifa', rifaId, rifa ? rifa.nombre : null, detalle);
+  db.prepare('INSERT INTO logs (accion, entidad, rifa_id, rifa_nombre, detalle, usuario) VALUES (?,?,?,?,?,?)')
+    .run(accion, 'rifa', rifaId, rifa ? rifa.nombre : null, detalle, usuario || null);
 }
 
 // Registro directo en el log global (sin rifa, o antes de purgar una rifa)
-function registrarLog(accion, entidad, rifaId, rifaNombre, detalle = '') {
-  db.prepare('INSERT INTO logs (accion, entidad, rifa_id, rifa_nombre, detalle) VALUES (?,?,?,?,?)')
-    .run(accion, entidad, rifaId || null, rifaNombre || null, detalle);
+function registrarLog(accion, entidad, rifaId, rifaNombre, detalle = '', usuario = null) {
+  db.prepare('INSERT INTO logs (accion, entidad, rifa_id, rifa_nombre, detalle, usuario) VALUES (?,?,?,?,?,?)')
+    .run(accion, entidad, rifaId || null, rifaNombre || null, detalle, usuario || null);
 }
 
 // Registro de auditoría de sorteos — trazabilidad completa de cada sorteo ejecutado
@@ -1075,7 +1075,7 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
       asegurarGrupos(rifaNueva);
     }
 
-    registrarHistorial(rifaId, 'creacion', `Rifa "${b.nombre}" creada en estado ${b.estado || 'borrador'}`);
+    registrarHistorial(rifaId, 'creacion', `Rifa "${b.nombre}" creada en estado ${b.estado || 'borrador'}`, req.usuario.usuario);
     res.status(201).json(getRifa(rifaId));
   } catch (err) {
     console.error(err);
@@ -1160,10 +1160,10 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
     b.porcentaje_organizador ?? rifa.porcentaje_organizador ?? 0,
     req.params.id
   );
-  if (b.estado && b.estado !== rifa.estado) registrarHistorial(req.params.id, 'cambio-estado', `${rifa.estado} -> ${b.estado}`);
+  if (b.estado && b.estado !== rifa.estado) registrarHistorial(req.params.id, 'cambio-estado', `${rifa.estado} -> ${b.estado}`, req.usuario.usuario);
   const camposConfig = ['nombre', 'valor_boleta', 'producto', 'descripcion', 'fecha_sorteo', 'hora_sorteo', 'tipo_rifa', 'mensaje_whatsapp', 'auto_liberar_horas', 'simbolos', 'premio1_nombre', 'premio2_nombre', 'premio3_nombre', 'premio4_nombre', 'cifras', 'revancha_permitida', 'modo_asignacion'];
   const cambiados = camposConfig.filter(c => b[c] !== undefined && String(b[c]) !== String(rifa[c]));
-  if (cambiados.length) registrarHistorial(req.params.id, 'config', `Configuración actualizada: ${cambiados.join(', ')}`);
+  if (cambiados.length) registrarHistorial(req.params.id, 'config', `Configuración actualizada: ${cambiados.join(', ')}`, req.usuario.usuario);
   const rifaEditada = getRifa(req.params.id);
   // Si se convierte a CHANCE sin boletas pre-generadas, generarlas
   if (esChance(rifaEditada)) {
@@ -1174,7 +1174,7 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
     const grupos = asegurarGrupos(rifaEditada);
     // Si se cambió la modalidad, la anterior (A_ELECCION/AL_AZAR) pierde validez
     if (nOportunidades(rifa) === 0 && grupos.length) {
-      registrarHistorial(req.params.id, 'config', 'Grupos de múltiples oportunidades generados');
+      registrarHistorial(req.params.id, 'config', 'Grupos de múltiples oportunidades generados', req.usuario.usuario);
     }
   }
   res.json(rifaEditada);
@@ -1216,7 +1216,7 @@ app.post('/api/rifas/:id/clonar', (req, res) => {
   const rifaNueva = getRifa(nuevaId);
   if (rifaNueva.modalidad_boleta === 'CUATRO_OPORTUNIDADES') asegurarGrupos(rifaNueva);
 
-  registrarHistorial(nuevaId, 'clonacion', `Clonada desde la rifa #${rifa.id}`);
+  registrarHistorial(nuevaId, 'clonacion', `Clonada desde la rifa #${rifa.id}`, req.usuario.usuario);
   res.status(201).json(rifaNueva);
 });
 
@@ -1226,7 +1226,7 @@ app.delete('/api/rifas/:id', (req, res) => {
   const rifa = getRifa(req.params.id);
   if (!rifa) return res.status(404).json({ error: 'Rifa no encontrada' });
   db.prepare('UPDATE rifas SET borrada_en = datetime(\'now\',\'localtime\') WHERE id = ?').run(req.params.id);
-  registrarHistorial(req.params.id, 'eliminacion', `Rifa movida a la papelera`);
+  registrarHistorial(req.params.id, 'eliminacion', `Rifa movida a la papelera`, req.usuario.usuario);
   res.json({ ok: true, papelera: true });
 });
 
@@ -1245,7 +1245,7 @@ app.post('/api/papelera/:id/restaurar', (req, res) => {
   const rifa = db.prepare('SELECT * FROM rifas WHERE id = ? AND borrada_en IS NOT NULL').get(req.params.id);
   if (!rifa) return res.status(404).json({ error: 'Rifa no encontrada en la papelera' });
   db.prepare('UPDATE rifas SET borrada_en = NULL WHERE id = ?').run(req.params.id);
-  registrarHistorial(req.params.id, 'restauracion', 'Rifa restaurada desde la papelera');
+  registrarHistorial(req.params.id, 'restauracion', 'Rifa restaurada desde la papelera', req.usuario.usuario);
   res.json({ ok: true });
 });
 
@@ -1288,7 +1288,7 @@ app.delete('/api/papelera', (req, res) => {
 // Auditoría de todos los cambios registrados en el sistema.
 app.get('/api/logs', (req, res) => {
   const { rifa_id, accion, q } = req.query;
-  let sql = 'SELECT id, accion, entidad, rifa_id, rifa_nombre, detalle, fecha FROM logs WHERE 1=1';
+  let sql = 'SELECT id, accion, entidad, rifa_id, rifa_nombre, detalle, fecha, usuario FROM logs WHERE 1=1';
   const params = [];
   if (rifa_id) { sql += ' AND rifa_id = ?'; params.push(rifa_id); }
   if (accion) { sql += ' AND accion = ?'; params.push(accion); }
@@ -1386,7 +1386,6 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
   const telefonoLimpio = limpiarTelefono(telefono);
 
   if (!nombreLimpio) return res.status(400).json({ error: 'El nombre es obligatorio' });
-  if (!telefonoLimpio) return res.status(400).json({ error: 'El número de teléfono es obligatorio' });
 
   const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
   const chance = esChance(rifa);
@@ -1403,14 +1402,11 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
     return res.status(409).json({ error: `Se alcanzó el máximo de ${maxBoletas} boletas permitido para esta rifa` });
   }
 
-  // Detección de duplicados: la cédula es opcional, así que si se da se valida
-  // contra la cédula; si no, se valida contra el teléfono (obligatorio).
+  // Detección de duplicados: solo se valida contra cédula si se proporciona.
+  // El teléfono NO se usa para detectar duplicados (varios participantes pueden tener el mismo teléfono).
   if (cedulaLimpia) {
     const dupC = db.prepare('SELECT id FROM participantes WHERE rifa_id = ? AND cedula = ?').get(rifaId, cedulaLimpia);
     if (dupC) return res.status(409).json({ error: `La cédula ${cedulaLimpia} ya está registrada en esta rifa` });
-  } else {
-    const dupT = db.prepare('SELECT id FROM participantes WHERE rifa_id = ? AND telefono = ?').get(rifaId, telefonoLimpio);
-    if (dupT) return res.status(409).json({ error: 'Ese número de teléfono ya está registrado en esta rifa' });
   }
 
   // --- Determinar el/los número(s) de la boleta ----------------------------
@@ -1520,7 +1516,8 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
   registrarHistorial(rifaId, 'registro',
     chance
       ? `${nombreLimpio} registrado con la boleta ${ticketLabel(elegidos[0], simboloElegido, rifa)}`
-      : `${nombreLimpio} registrado con ${elegidos.length === 1 ? 'el número ' + fmtNumero(rifa, elegidos[0]) : 'los números ' + elegidos.map(n => fmtNumero(rifa, n)).join(', ')}`);
+      : `${nombreLimpio} registrado con ${elegidos.length === 1 ? 'el número ' + fmtNumero(rifa, elegidos[0]) : 'los números ' + elegidos.map(n => fmtNumero(rifa, n)).join(', ')}`,
+    req.usuario.usuario);
   const creado = db.prepare('SELECT * FROM participantes WHERE id = ?').get(id);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
   enviarPush('Nuevo participante', `${nombreLimpio} se registró en ${rifaInfo?.nombre || 'una rifa'}`, { rifaId, tipo: 'nueva_venta' });
@@ -1553,8 +1550,8 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
   const resultado = { insertados: [], duplicados: [], errores: [], sinCupo: [] };
 
   const clavesExistentes = new Set(
-    db.prepare('SELECT cedula, telefono FROM participantes WHERE rifa_id = ?').all(rifaId)
-      .map(r => (r.cedula ? 'C:' + r.cedula : 'T:' + r.telefono))
+    db.prepare('SELECT cedula FROM participantes WHERE rifa_id = ? AND cedula IS NOT NULL AND cedula != \'\'').all(rifaId)
+      .map(r => 'C:' + r.cedula)
   );
 
   const dashboardInicial = calcularDashboard(rifaId);
@@ -1581,9 +1578,9 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
         nombre = limpiarTexto(partes[0]);
       }
 
-      if (!nombre || !telefono) { resultado.errores.push(linea); continue; }
-      const clave = cedula ? 'C:' + cedula : 'T:' + telefono;
-      if (clavesExistentes.has(clave)) { resultado.duplicados.push({ nombre, cedula, telefono }); continue; }
+      if (!nombre) { resultado.errores.push(linea); continue; }
+      const clave = cedula ? 'C:' + cedula : null;
+      if (clave && clavesExistentes.has(clave)) { resultado.duplicados.push({ nombre, cedula, telefono }); continue; }
       if (cuposDisponibles <= 0) { resultado.sinCupo.push({ nombre, cedula, telefono }); continue; }
 
       // Buscar boleta libre: 1 número normal / 4 en CUATRO_OPORTUNIDADES / combinación (número,símbolo) en CHANCE
@@ -1601,7 +1598,7 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
         if (libresGrupo.length === 0) { resultado.sinCupo.push({ nombre, cedula, telefono }); continue; }
         asignados = shuffle(libresGrupo)[0].numeros;
       } else {
-        const libre = db.prepare("SELECT numero FROM numeros WHERE rifa_id=? AND estado='libre' ORDER BY numero ASC LIMIT 1").get(rifaId);
+        const libre = db.prepare("SELECT numero FROM numeros WHERE rifa_id=? AND estado='libre' ORDER BY RANDOM() LIMIT 1").get(rifaId);
         if (!libre) { resultado.sinCupo.push({ nombre, cedula, telefono }); continue; }
         asignados = [libre.numero];
       }
@@ -1618,7 +1615,7 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
   });
   procesar();
 
-  registrarHistorial(rifaId, 'registro-masivo', `${resultado.insertados.length} participantes agregados, ${resultado.duplicados.length} duplicados omitidos`);
+  registrarHistorial(rifaId, 'registro-masivo', `${resultado.insertados.length} participantes agregados, ${resultado.duplicados.length} duplicados omitidos`, req.usuario.usuario);
   res.status(201).json(resultado);
 });
 
@@ -1656,7 +1653,7 @@ app.put('/api/participantes/:id', (req, res) => {
     }
     db.prepare('UPDATE participantes SET nombre=?, cedula=?, telefono=? WHERE id=?')
       .run(nombre, cedula, telefono, req.params.id);
-    registrarHistorial(p.rifa_id, 'edicion-participante', `Datos de ${nombre} (boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')}) actualizados`);
+    registrarHistorial(p.rifa_id, 'edicion-participante', `Datos de ${nombre} (boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')}) actualizados`, req.usuario.usuario);
   }
 
   if (b.estado_pago !== undefined) {
@@ -1670,7 +1667,7 @@ app.put('/api/participantes/:id', (req, res) => {
     // Y las boletas del chance (número x símbolo)
     db.prepare('UPDATE boletas_chance SET estado=? WHERE participante_id=?')
       .run(estado_pago, req.params.id);
-    registrarHistorial(p.rifa_id, 'pago', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${nombre || p.nombre}) marcada como ${estado_pago}`);
+    registrarHistorial(p.rifa_id, 'pago', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${nombre || p.nombre}) marcada como ${estado_pago}`, req.usuario.usuario);
     if (estado_pago === 'pagado') {
       const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(p.rifa_id);
       enviarPush('Pago confirmado', `${nombre || p.nombre} pagó su boleta en ${rifaInfo?.nombre || 'una rifa'}`, { rifaId: p.rifa_id, tipo: 'pago' });
@@ -1689,7 +1686,7 @@ app.delete('/api/participantes/:id', (req, res) => {
   db.prepare("UPDATE boletas_chance SET estado='libre', participante_id=NULL, fecha_reservado=NULL WHERE participante_id=?")
     .run(req.params.id);
   db.prepare('DELETE FROM participantes WHERE id = ?').run(req.params.id);
-  registrarHistorial(p.rifa_id, 'liberacion-manual', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${p.nombre}) liberada manualmente`);
+  registrarHistorial(p.rifa_id, 'liberacion-manual', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${p.nombre}) liberada manualmente`, req.usuario.usuario);
   res.json({ ok: true });
 });
 
@@ -1766,7 +1763,7 @@ app.post('/api/rifas/:id/sortear', (req, res) => {
   });
   guardar();
 
-  registrarHistorial(rifaId, 'sorteo', `Modalidad ${modalidad}, semilla ${semilla}, ganadores: ${ganadores.map(g => fmtNumero(rifa, g.numero)).join(', ')}`);
+  registrarHistorial(rifaId, 'sorteo', `Modalidad ${modalidad}, semilla ${semilla}, ganadores: ${ganadores.map(g => fmtNumero(rifa, g.numero)).join(', ')}`, req.usuario.usuario);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
   const nombresGanadores = ganadores.map(g => g.nombre).join(', ');
   registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', modalidad, req.session?.usuario || 'sistema', semilla, ganadores, { modalidad, semilla, ganadores: ganadores.map(g => ({ numero: g.numero, nombre: g.nombre })) });
@@ -1863,7 +1860,8 @@ app.post('/api/rifas/:id/chance-sorteo', (req, res) => {
 
   const pagados = db.prepare("SELECT COUNT(*) c FROM participantes WHERE rifa_id=? AND estado_pago='pagado'").get(rifaId).c;
   registrarHistorial(rifaId, esRevancha ? 'sorteo-chance-revancha' : 'sorteo-chance',
-    `Chance ${numeroStr} ${simboloGanador}${esRevancha ? ' (revancha de ' + premiosSol.join(',') + ')' : ''}, semilla ${semilla}`);
+    `Chance ${numeroStr} ${simboloGanador}${esRevancha ? ' (revancha de ' + premiosSol.join(',') + ')' : ''}, semilla ${semilla}`,
+    req.usuario.usuario);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
   registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', esRevancha ? 'chance-revancha' : 'chance', req.session?.usuario || 'sistema', semilla, resultados, { cifras: numeroStr, simbolo: simboloGanador, premios: resultados, revancha: esRevancha });
 
@@ -1885,7 +1883,7 @@ app.post('/api/rifas/:id/chance-finalizar', (req, res) => {
   if (!rifa) return res.status(404).json({ error: 'Rifa no encontrada' });
   if (!esChance(rifa)) return res.status(400).json({ error: 'Esta rifa no es de Chance con símbolo' });
   db.prepare("UPDATE rifas SET estado='sorteada' WHERE id=?").run(req.params.id);
-  registrarHistorial(req.params.id, 'sorteo-finalizado', 'Sorteo de chance finalizado');
+  registrarHistorial(req.params.id, 'sorteo-finalizado', 'Sorteo de chance finalizado', req.usuario.usuario);
   res.json(getRifa(req.params.id));
 });
 
@@ -1956,7 +1954,7 @@ app.post('/api/rifas/:id/balotera', (req, res) => {
   db.prepare(`INSERT INTO ganadores (rifa_id, numero, participante_id, nombre, modalidad, semilla) VALUES (?,?,?,?,?,?)`)
     .run(rifaId, numeroGanador, ganador.id, ganador.nombre, 'balotera', semilla);
   db.prepare("UPDATE rifas SET estado='sorteada' WHERE id=?").run(rifaId);
-  registrarHistorial(rifaId, 'sorteo-balotera', `Ganador ${fmtNumero(rifa, numeroGanador)} (${ganador.nombre}), semilla ${semilla}, modo: ${modoParticipantes}`);
+  registrarHistorial(rifaId, 'sorteo-balotera', `Ganador ${fmtNumero(rifa, numeroGanador)} (${ganador.nombre}), semilla ${semilla}, modo: ${modoParticipantes}`, req.usuario.usuario);
   const rifaInfo = db.prepare('SELECT nombre FROM rifas WHERE id = ?').get(rifaId);
   registrarSorteoAuditoria(rifaId, rifaInfo?.nombre || '', 'balotera', req.session?.usuario || 'sistema', semilla, [{ numero: numeroGanador, nombre: ganador.nombre }], { numero: numeroGanador, cifras, modo: modoParticipantes });
 
@@ -2240,7 +2238,7 @@ app.post('/api/rifas/:id/generar-poster', async (req, res) => {
     fs.writeFileSync(rutaFinal, buffer);
 
     db.prepare('UPDATE rifas SET poster_image_url = ? WHERE id = ?').run(`/uploads/${nombreArchivo}`, rifa.id);
-    registrarHistorial(rifa.id, 'poster', `Poster promocional ${W * ESCALA}x${H * ESCALA} generado`);
+    registrarHistorial(rifa.id, 'poster', `Poster promocional ${W * ESCALA}x${H * ESCALA} generado`, req.usuario.usuario);
 
     res.json({ ok: true, url: `/uploads/${nombreArchivo}`, rifaId: rifa.id });
   } catch (err) {

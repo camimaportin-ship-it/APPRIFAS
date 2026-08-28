@@ -371,6 +371,12 @@ CREATE INDEX IF NOT EXISTS idx_sorteos_aud_fecha ON sorteos_auditoria(fecha);
   if (!tieneColumna(db, 'rifas', 'porcentaje_organizador'))
     db.exec(`ALTER TABLE rifas ADD COLUMN porcentaje_organizador INTEGER DEFAULT 0`);
 
+  // Migración: columna usuario en logs e historial
+  if (!tieneColumna(db, 'logs', 'usuario'))
+    db.exec(`ALTER TABLE logs ADD COLUMN usuario TEXT`);
+  if (!tieneColumna(db, 'historial', 'usuario'))
+    db.exec(`ALTER TABLE historial ADD COLUMN usuario TEXT`);
+
   const admins = [
     { usuario: 'hans4269', nombre: 'Hans Admin', password: 'Rifas01234' },
     { usuario: 'sairaosorio78', nombre: 'Saira Admin', password: 'Rifas01234' }
