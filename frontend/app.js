@@ -1359,22 +1359,6 @@ async function renderResumen(rifa, d) {
       </div>
     </div>
 
-    <div class="card card-pad mb-4" style="border:1.5px solid #D4A017; background:linear-gradient(135deg,#FFFBEB,#FFFFFF);">
-      <h3 class="mb-3">🔗 Compartir y referidos</h3>
-      <div class="flex gap-2 mb-3" style="align-items:center;">
-        <input class="input" id="input-link-publico" readonly value="${window.location.origin}/r/${rifa.id}" onclick="this.select()" style="flex:1;">
-        <button class="btn btn-gold btn-sm" onclick="copiarLinkPublico('${window.location.origin}/r/${rifa.id}')">📋 Copiar link</button>
-        <a class="btn btn-outline btn-sm" target="_blank" href="/r/${rifa.id}">Abrir landing</a>
-      </div>
-      <div class="flex gap-2 mb-2">
-        <input class="input" id="input-ref-codigo" placeholder="Código referido (ej. HANS10)" style="flex:1; max-width:180px;">
-        <button class="btn btn-outline btn-sm" onclick="generarReferido(${rifa.id})">🎁 Generar código</button>
-        <button class="btn btn-outline btn-sm" onclick="copiarLinkReferido(${rifa.id})">📋 Copiar con ref</button>
-      </div>
-      <p class="text-xs text-ink-600">El link <code>/r/:id</code> tiene OG tags y redirige a <code>/#/rifas/:id</code>. Usa <code>?ref=CODIGO</code> para tracking.</p>
-      ${FEATURE_WOMPI ? `<div class="flex gap-2 mt-3"><button class="btn btn-outline btn-sm" onclick="verPagos(${rifa.id})">💳 Ver pagos Wompi</button><a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/og-image" target="_blank">🖼️ Ver OG image</a></div><div id="pagos-lista" class="mt-3"></div>` : `<div class="flex gap-2 mt-3"><a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/og-image" target="_blank">🖼️ Ver OG image</a></div>`}
-    </div>
-
     <div class="grid-2">
       <div class="card card-pad">
         <h3 class="mb-3">Datos del premio</h3>
