@@ -4388,6 +4388,35 @@ async function renderPaginaPublica(id) {
         <div class="numeros-grid">
           ${numeros.map(n => `<div class="numero-chip ${n.estado}"><span>${fmtNum(rifa, n.numero)}</span>${n.nombre ? `<span class="who">${escapeHtml(n.nombre.split(' ')[0])}</span>` : ''}</div>`).join('')}
         </div>`}
+      <div class="card card-pad mb-4" style="border:1.5px solid var(--gold-500); background:linear-gradient(135deg,#FFFBEB,#FFFFFF);">
+        <h3 class="mb-3">🔗 Transparencia</h3>
+        <p class="text-xs text-ink-600 mb-3">Por transparencia, mostramos el nombre de cada comprador pero <strong>ocultamos su cédula</strong>.</p>
+        <div class="grid-2 mb-4">
+          <div>
+            <h4 style="margin:0 0 8px;">👥 Compradores (${vendidos})</h4>
+            <div style="max-height:200px; overflow-y:auto;">
+              ${(() => {
+                const compradores = (esChance ? boletas : numeros).filter(n => n.estado !== 'libre' && n.nombre);
+                if (compradores.length === 0) return '<p class="text-xs text-ink-600">Aún no hay compradores.</p>';
+                return `<table class="tbl" style="font-size:12px;"><thead><tr><th>Nombre</th><th>Boleta</th></tr></thead><tbody>${
+                  compradores.map(n => `<tr><td>${escapeHtml(n.nombre.split(' ')[0] + (n.nombre.split(' ')[1] ? ' ' + n.nombre.split(' ').slice(-1)[0] : ''))}</td><td class="mono" style="font-weight:700; color:var(--gold-600);">${esChance ? escapeHtml(n.label) : fmtNum(rifa, n.numero)}</td></tr>`).join('')
+                }</tbody></table>`;
+              })()}
+            </div>
+          </div>
+          <div>
+            <h4 style="margin:0 0 8px;">🎟️ Disponibles (${total - vendidos})</h4>
+            <div class="numeros-grid" style="max-height:200px;">
+              ${(() => {
+                const libres = (esChance ? boletas : numeros).filter(n => n.estado === 'libre');
+                if (libres.length === 0) return '<p class="text-xs text-ink-600">No quedan boletas disponibles.</p>';
+                const muestra = libres.slice(0, 60);
+                return muestra.map(n => `<div class="numero-chip libre"><span>${esChance ? escapeHtml(n.label) : fmtNum(rifa, n.numero)}</span></div>`).join('') + (libres.length > 60 ? `<div class="numero-chip" style="background:var(--line-soft); cursor:default;"><span>+${libres.length - 60}</span></div>` : '');
+              })()}
+            </div>
+          </div>
+        </div>
+      </div>
       <p class="text-center text-xs text-ink-600 mt-4 mb-4">Generado con Rifas SYC · ${DISCLAIMER}</p>
     </div>`);
 }
