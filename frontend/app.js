@@ -1239,6 +1239,18 @@ async function apiForm(path, formData, method = 'POST') {
 // VISTA: DETALLE DE RIFA (tabs)
 // ================================================================================
 async function vistaDetalleRifa(id, tab) {
+  // Corte real Fase — delega a módulo ES si está disponible, si no usa fallback clásico
+  try {
+    const mod = await import('./src/views/rifaDetalle.js');
+    if (mod && mod.vistaDetalleRifaModular) return mod.vistaDetalleRifaModular(id, tab, {
+      api, toast, moverACarpeta, clonarRifa, eliminarRifa,
+      renderParticipantesTab, renderPublicidadTab, renderBaloteraTab,
+      renderSorteoTab, renderWhatsappTab, renderHistorialTab,
+      modalAplazarRifa, safeAttr, copiarLinkPublico, generarReferido,
+      copiarLinkReferido, verPagos, descargarAutenticada,
+      exportarReportePDF, abrirRestoreModal, FEATURE_WOMPI
+    });
+  } catch (e) { /* fallback a código clásico */ }
   const [rifa, dashboard] = await Promise.all([api('/rifas/' + id), api('/rifas/' + id + '/dashboard')]);
   state.rifaActual = rifa;
   document.getElementById('page-title').textContent = rifa.nombre;
@@ -4232,7 +4244,9 @@ async function vistaEmpresa() {
       const fd = new FormData(e.target);
       const actualizado = await apiForm('/empresa', fd, 'PUT');
       state.empresa = actualizado;
-      document.getElementById('empresa-nombre-sidebar').textContent = actualizado.nombre_empresa;
+      const elSidebar = document.getElementById('empresa-nombre-sidebar');
+      elSidebar.textContent = actualizado.nombre_empresa;
+      elSidebar.title = actualizado.nombre_empresa;
       toast('Datos de empresa guardados');
     } catch (err) {
       if (!String(err.message).includes('Sesión expirada')) toast(err.message, 'error');
@@ -4433,7 +4447,9 @@ async function initApp() {
   try {
     const empresa = await api('/empresa');
     state.empresa = empresa;
-    document.getElementById('empresa-nombre-sidebar').textContent = empresa.nombre_empresa || 'Colombia';
+    const el = document.getElementById('empresa-nombre-sidebar');
+    el.textContent = empresa.nombre_empresa || 'Colombia';
+    el.title = empresa.nombre_empresa || 'Colombia';
   } catch (e) {}
   // Tooltip en nav-links: muestra texto completo al pasar el mouse
   document.querySelectorAll('.nav-link').forEach(link => {
