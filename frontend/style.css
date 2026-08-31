@@ -857,6 +857,18 @@ table.tbl th{white-space:nowrap;}
 .changelog-cat{margin-bottom:16px;}
 .changelog-cat:last-child{margin-bottom:0;}
 .changelog-cat h4{font-size:14px; color:var(--ink-900);}
+.nav-icon{width:18px; height:18px; flex-shrink:0; stroke:currentColor; opacity:0.9;}
+.nav-link.active .nav-icon{opacity:1; stroke:var(--navy-950);}
+.rifas-grid .card{border:1px solid #E4E7EC; transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease;}
+.rifas-grid .card:hover{transform:translateY(-2px); box-shadow:0 8px 24px rgba(16,24,40,0.08); border-color:#D0D5DD;}
+.app-footer a{color:var(--ink-600); text-decoration:none;}
+.app-footer a:hover{color:var(--navy-800); text-decoration:underline;}
+/* Login pro — card blanca sólida Fase pulido */
+#login-screen form{background:#ffffff !important; backdrop-filter:none !important; border:1px solid #E4E7EC !important; box-shadow:0 20px 40px rgba(11,18,41,0.18) !important;}
+#login-screen form label{color:#344054 !important;}
+#login-screen form input{background:#FFFFFF !important; border:1px solid #D0D5DD !important; color:#101828 !important;}
+#login-screen form input::placeholder{color:#98A2B3 !important;}
+#login-screen #login-error{background:#FEF3F2 !important; border-color:#FECDCA !important; color:#B42318 !important;}
 .changelog-cat ul{font-size:13px; color:var(--ink-700); line-height:1.6;}
 .changelog-cat li::marker{color:var(--gold-500);}
 @media(max-width:600px){

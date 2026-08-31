@@ -372,6 +372,20 @@ function activarNav(route) {
     a.classList.toggle('active', isActive);
     if (isActive) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  // Breadcrumb pro — Fase pulido
+  const bc = document.getElementById('breadcrumb');
+  if (bc) {
+    const parts = route.split('/').filter(Boolean);
+    const crumbs = ['<a href="#/rifas" style="color:var(--ink-400);">Inicio</a>'];
+    if (parts[0]==='rifas' && parts[1]==='nueva') crumbs.push('<span>Nueva rifa</span>');
+    else if (parts[0]==='rifas' && parts[1]) {
+      crumbs.push('<a href="#/rifas" style="color:var(--ink-400);">Rifas</a>');
+      if (parts[2]==='editar') crumbs.push('<span>Editar</span>');
+      else if (parts[2]) crumbs.push('<span>'+parts[2]+'</span>');
+      else crumbs.push('<span>Detalle</span>');
+    } else if (parts[0]) crumbs.push('<span>'+parts[0]+'</span>');
+    bc.innerHTML = crumbs.join('<span style="opacity:0.5;">/</span>');
+  }
 }
 
 async function router() {
@@ -1487,7 +1501,7 @@ async function renderParticipantesTab(rifa, box) {
               <td class="flex gap-2">
                 ${FEATURE_WOMPI && p.estado_pago === 'pendiente' ? `<button class="btn btn-gold btn-sm" title="Pagar con Wompi" onclick="iniciarCheckout(${rifa.id}, ${p.id})">💳</button>` : ''}
                 ${p.estado_pago === 'pendiente' ? `<button class="btn btn-ghost btn-sm" title="Enviar recordatorio" onclick='recordatorioWhatsapp(${safeAttr({ nombre: p.nombre, numeros: p.numeros || [p.numero], rifa_nombre: rifa.nombre, valor: rifa.valor_boleta, telefono: p.telefono })})'>💬</button>` : ''}
-                ${rifa.estado === 'activa' ? `<button class="btn btn-ghost btn-sm" title="Editar datos del participante" onclick='modalEditarParticipante(${rifa.id}, ${safeAttr({ id: p.id, nombre: p.nombre, telefono: p.telefono, cedula: p.cedula, numeros: p.numeros || [p.numero], estado_pago: p.estado_pago })})'>✏️</button>` : ''}
+                ${rifa.estado === 'activa' ? `<button class="btn btn-ghost btn-sm" title="Editar datos del participante" onclick='modalEditarParticipante(${rifa.id}, ${safeAttr({ id: p.id, nombre: p.nombre, telefono: p.telefono, cedula: p.cedula, numeros: p.numeros || [p.numero], estado_pago: p.estado_pago, metodo_pago: p.metodo_pago || "", observacion: p.observacion || "" })})'>✏️</button>` : ''}
                 <button class="btn btn-ghost btn-sm" title="Eliminar / liberar número" onclick="eliminarParticipante(${p.id}, ${rifa.id})">🗑️</button>
               </td>
             </tr>`).join('')}
@@ -2366,11 +2380,41 @@ async function _registrarDesdeSeleccion() {
 }
 
 async function cambiarEstadoPago(participanteId, estado, rifaId) {
+  if (estado === 'pagado') {
+    // Pedir modalidad y observación antes de marcar pagado
+    abrirModal(`
+      <div class="modal__header"><h3>Confirmar pago</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
+      <form id="form-confirmar-pago" class="modal__body">
+        <div class="field"><label>Método de pago</label>
+          <select class="input" name="metodo_pago" required>
+            <option value="">Seleccionar...</option>
+            <option value="efectivo">💵 Efectivo</option>
+            <option value="transferencia">🏦 Transferencia</option>
+          </select>
+        </div>
+        <div class="field"><label>Observación (opcional)</label><input class="input" name="observacion" placeholder="Ej: Referencia, comprobante #"></div>
+        <div class="modal__footer" style="padding:0; margin-top:10px;">
+          <button type="button" class="btn btn-ghost" onclick="cerrarModal(); vistaDetalleRifa(${rifaId}, 'participantes')">Cancelar</button>
+          <button type="submit" class="btn btn-gold">Confirmar pagado</button>
+        </div>
+      </form>`);
+    document.getElementById('form-confirmar-pago').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = Object.fromEntries(new FormData(e.target));
+      try {
+        await api('/participantes/' + participanteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado_pago: 'pagado', metodo_pago: fd.metodo_pago, observacion: fd.observacion }) });
+        toast('Pago confirmado');
+        cerrarModal();
+        vistaDetalleRifa(rifaId, 'participantes');
+      } catch (err) { toast(err.message, 'error'); }
+    });
+    return;
+  }
   try {
     await api('/participantes/' + participanteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado_pago: estado }) });
-    toast('Estado actualizado');
+    toast('Estado actualizado a pendiente');
     vistaDetalleRifa(rifaId, 'participantes');
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); vistaDetalleRifa(rifaId, 'participantes'); }
 }
 
 function modalEditarParticipante(rifaId, p) {
@@ -2385,10 +2429,22 @@ function modalEditarParticipante(rifaId, p) {
       <div class="field"><label>Cédula (opcional)</label><input class="input" name="cedula" inputmode="numeric" value="${escapeHtml(p.cedula || '')}"></div>
       <div class="field">
         <label>Estado de pago</label>
-        <select class="input" name="estado_pago">
+        <select class="input" name="estado_pago" id="sel-edit-estado-pago" onchange="document.getElementById('edit-campos-pago').style.display = this.value === 'pagado' ? 'grid' : 'none'; document.getElementById('edit-campo-observacion').style.display = this.value === 'pagado' ? 'block' : 'none';">
           <option value="pendiente" ${p.estado_pago === 'pendiente' ? 'selected' : ''}>Pendiente</option>
           <option value="pagado" ${p.estado_pago === 'pagado' ? 'selected' : ''}>Pagado</option>
         </select>
+      </div>
+      <div id="edit-campos-pago" style="display:${p.estado_pago === 'pagado' ? 'grid' : 'none'};">
+        <div class="field"><label>Método de pago</label>
+          <select class="input" name="metodo_pago">
+            <option value="">Seleccionar...</option>
+            <option value="efectivo" ${(p.metodo_pago||'')==='efectivo'?'selected':''}>💵 Efectivo</option>
+            <option value="transferencia" ${(p.metodo_pago||'')==='transferencia'?'selected':''}>🏦 Transferencia</option>
+          </select>
+        </div>
+      </div>
+      <div id="edit-campo-observacion" style="display:${p.estado_pago === 'pagado' ? 'block' : 'none'};">
+        <div class="field"><label>Observación</label><input class="input" name="observacion" value="${escapeHtml(p.observacion||'')}" placeholder="Ej: Comprobante, referencia"></div>
       </div>
       <div class="modal__footer" style="padding:0; margin-top:10px;">
         <button type="button" class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
