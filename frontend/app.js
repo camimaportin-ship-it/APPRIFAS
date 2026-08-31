@@ -912,9 +912,9 @@ function renderFormularioRifa(rifa) {
     </p>
 
     <div class="field">
-      <label class="check-row mb-1"><input type="checkbox" id="chk-auto-liberar" ${(v.auto_liberar_horas ?? 24) > 0 ? 'checked' : ''}> <span>Habilitar <strong>auto-liberación</strong> de boletas con pago pendiente</span></label>
-      <div id="campo-auto-liberar">
-        <input class="input" name="auto_liberar_horas" type="number" min="0" value="${v.auto_liberar_horas ?? 24}">
+  <label class="check-row mb-1"><input type="checkbox" id="chk-auto-liberar" ${(v.auto_liberar_horas ?? 0) > 0 ? 'checked' : ''}> <span>Habilitar <strong>auto-liberación</strong> de boletas con pago pendiente</span></label>
+  <div id="campo-auto-liberar">
+    <input class="input" name="auto_liberar_horas" type="number" min="0" value="${v.auto_liberar_horas ?? 0}">
         <span class="hint">La boleta se libera automáticamente si el pago sigue pendiente más de este número de horas.</span>
       </div>
     </div>
@@ -1188,7 +1188,7 @@ function bindFormularioRifa(rifa) {
         ? await apiForm('/rifas/' + rifa.id, fd, 'PUT')
         : await apiForm('/rifas', fd, 'POST');
       toast(rifa ? 'Rifa actualizada' : 'Rifa creada correctamente');
-      window.location.hash = '#/rifas/' + guardado.id;
+      window.location.hash = rifa ? '#/rifas/' + guardado.id + '/participantes' : '#/rifas/' + guardado.id;
     } catch (err) { toast(err.message, 'error'); }
   });
 }
@@ -1266,7 +1266,7 @@ async function renderResumen(rifa, d) {
   let disponiblesHTML;
   if (esChance) {
     disponiblesHTML = chanceLibres.length
-      ? `<div class="grilla-numeros disponibles-lista">${chanceLibres.slice(0, 120).map(b => `<div class="grilla-celda libre" style="cursor:default;" title="${b.label}">${b.label}</div>`).join('')}</div>
+      ? `<div class="grilla-numeros disponibles-lista">${chanceLibres.slice(0, 120).map(b => `<button type="button" class="grilla-celda libre" onclick="window.location.hash='#/rifas/${rifa.id}/participantes'" title="Ver mapa: ${b.label}">${b.label}</button>`).join('')}</div>
          <p class="text-xs text-ink-600 mt-2">Mostrando las primeras 120 de ${chanceLibres.length} boletas disponibles.</p>`
       : `<div class="empty-state" style="padding:20px;"><div class="icon">🎟️</div><p>No quedan boletas disponibles</p></div>`;
   } else if (esCuatro) {
@@ -1278,7 +1278,7 @@ async function renderResumen(rifa, d) {
       : `<div class="empty-state" style="padding:20px;"><div class="icon">🎟️</div><p>No quedan grupos disponibles</p></div>`;
   } else {
     disponiblesHTML = libres.length
-      ? `<div class="grilla-numeros disponibles-lista">${libres.map(n => `<div class="grilla-celda libre" style="cursor:default;" title="${n.numero}">${n.numero}</div>`).join('')}</div>`
+      ? `<div class="grilla-numeros disponibles-lista">${libres.map(n => `<button type="button" class="grilla-celda libre" onclick="abrirCasilla(${rifa.id}, '${n.numero}')" title="Registrar ${n.numero}">${n.numero}</button>`).join('')}</div>`
       : `<div class="empty-state" style="padding:20px;"><div class="icon">🎟️</div><p>No quedan números disponibles</p></div>`;
   }
 
@@ -1374,6 +1374,7 @@ async function renderParticipantesTab(rifa, box) {
   const simbolos = dataNumeros.simbolos || [];
   const boletas = dataNumeros.boletas || [];
   state.gruposActual = grupos;
+  state.numerosActual = numeros;
 
   const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
   const esChance = modoEsChance(rifa);
@@ -1417,14 +1418,15 @@ async function renderParticipantesTab(rifa, box) {
             ${simbolos.map(s => `<button type="button" class="chance-simbolo" data-simbolo="${escapeHtml(s)}" title="Boletas ${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}
           </div>
           <div id="chance-mapa-boletas" class="grilla-numeros mapa-numeros mt-3" style="max-height:340px;"></div>
-        </div>` : `
-        <div class="grilla-numeros mapa-numeros mt-3" style="max-height:340px;">
-          ${numeros.map(n => {
-            const lbl = esCuatro ? String(n.numero).padStart(2, '0') : String(n.numero);
-            const titulo = n.nombre ? `${lbl} · ${n.nombre}` : `${lbl} · disponible`;
-            const vendido = n.estado !== 'libre';
-            return `<button type="button" class="grilla-celda ${n.estado}" onclick="abrirCasilla(${rifa.id}, '${String(n.numero)}')" title="${escapeHtml(titulo)}">${lbl}</button>`;
-          }).join('')}
+        </div>` : esCuatro ? `
+        <p class="text-sm text-ink-600 mt-3">Los grupos de ${nOport(rifa)} oportunidades se muestran más abajo.</p>` : `
+        <div class="mt-3">
+          <div class="seg-vista" id="numeros-vista-sel" role="tablist">
+            <button type="button" class="seg-btn ${(localStorage.getItem('rifas-numeros-vista') || 'cuadricula') === 'cuadricula' ? 'active' : ''}" data-vista="cuadricula" onclick="cambiarVistaNumeros('cuadricula')" title="Cuadrícula de casillas">▦ Cuadrícula</button>
+            <button type="button" class="seg-btn ${localStorage.getItem('rifas-numeros-vista') === 'tabla' ? 'active' : ''}" data-vista="tabla" onclick="cambiarVistaNumeros('tabla')" title="Tabla con columnas">▤ Tabla</button>
+            <button type="button" class="seg-btn ${localStorage.getItem('rifas-numeros-vista') === 'lista' ? 'active' : ''}" data-vista="lista" onclick="cambiarVistaNumeros('lista')" title="Listado compacto">☰ Lista</button>
+          </div>
+          <div class="mt-3" id="numeros-vista-cont">${vistaNumerosHtml(rifa, numeros, localStorage.getItem('rifas-numeros-vista') || 'cuadricula')}</div>
         </div>`}
       <div class="flex gap-2 mt-2" style="flex-wrap:wrap;">
         <button class="btn btn-outline btn-sm" onclick="exportarMapaNumeros(${rifa.id}, 'disponibles')">📤 Exportar disponibles</button>
@@ -1825,6 +1827,72 @@ function cambiarVistaGrupos(vista) {
   if (cont) cont.innerHTML = vistaGruposHtml(rifa, grupos, vista);
 }
 
+// ==================== VISTAS PARA NÚMEROS (BOLETAS_NORMAL / CHANCE) ====================
+
+function vistaNumerosHtml(rifa, numeros, vista) {
+  if (vista === 'tabla') return vistaNumerosTabla(rifa, numeros);
+  if (vista === 'lista') return vistaNumerosLista(rifa, numeros);
+  return vistaNumerosCuadricula(rifa, numeros);
+}
+
+function vistaNumerosCuadricula(rifa, numeros) {
+  return `<div class="grilla-numeros mapa-numeros" style="max-height:340px;">
+    ${numeros.map(n => {
+      const lbl = String(n.numero).padStart(2, '0');
+      const titulo = n.nombre ? `${lbl} · ${n.nombre}` : `${lbl} · disponible`;
+      return `<button type="button" class="grilla-celda ${n.estado}" onclick="abrirCasilla(${rifa.id}, '${String(n.numero)}')" title="${escapeHtml(titulo)}">${lbl}</button>`;
+    }).join('')}
+  </div>`;
+}
+
+function vistaNumerosTabla(rifa, numeros) {
+  return `<div style="overflow-x:auto;">
+    <table class="tbl tbl-grupos">
+      <thead><tr><th>#</th><th>Número</th><th>Estado</th><th>Comprador</th><th></th></tr></thead>
+      <tbody>
+        ${numeros.map((n, i) => {
+          const lbl = String(n.numero).padStart(2, '0');
+          const estado = n.estado === 'libre' ? 'libre' : (n.estado === 'pagado' ? 'pagado' : 'pendiente');
+          const badge = n.estado === 'libre' ? 'activa' : (n.estado === 'pagado' ? 'pagado' : 'pendiente');
+          const txt = n.estado === 'libre' ? '🟢 disponible' : (n.estado === 'pagado' ? '🟢 pagado' : '🟡 pendiente');
+          return `<tr class="fila-grupo-${estado}">
+            <td class="text-xs text-ink-600">${String(i + 1).padStart(2, '0')}</td>
+            <td class="mono" style="font-weight:700; letter-spacing:1px;">${lbl}</td>
+            <td><span class="badge badge-${badge}">${txt}</span></td>
+            <td>${escapeHtml(n.nombre || '—')}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="abrirCasilla(${rifa.id}, '${String(n.numero)}')">${n.estado === 'libre' ? '🎟️ Registrar' : '👁️ Ver'}</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function vistaNumerosLista(rifa, numeros) {
+  return `<div class="grupos-lista">
+    ${numeros.map((n, i) => {
+      const lbl = String(n.numero).padStart(2, '0');
+      const txt = n.estado === 'libre' ? '🟢 disponible' : (n.estado === 'pagado' ? '🟢 pagado' : '🟡 pendiente');
+      return `<button type="button" class="grupos-lista-fila ${n.estado}" onclick="abrirCasilla(${rifa.id}, '${String(n.numero)}')">
+        <span class="text-xs text-ink-600 mono">#${String(i + 1).padStart(2, '0')}</span>
+        <span class="grupo-nums">${lbl}</span>
+        <span class="grupos-lista-who">${escapeHtml(n.nombre || '')}</span>
+        <span class="grupo-estado">${txt}</span>
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
+function cambiarVistaNumeros(vista) {
+  localStorage.setItem('rifas-numeros-vista', vista);
+  const sel = document.getElementById('numeros-vista-sel');
+  if (sel) sel.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === vista));
+  const cont = document.getElementById('numeros-vista-cont');
+  const rifa = state.rifaActual || {};
+  const numeros = state.numerosActual || [];
+  if (cont) cont.innerHTML = vistaNumerosHtml(rifa, numeros, vista);
+}
+
 // Click sobre una casilla del mapa de números (o de boletas del chance)
 function abrirCasilla(rifaId, numero, simbolo) {
   const rifa = state.rifaActual || {};
@@ -1863,6 +1931,32 @@ function modalRegistroIndividual(rifaId, preseleccion) {
         <div class="field"><label>Teléfono</label><input class="input" name="telefono" inputmode="tel" placeholder="3001234567" maxlength="20"></div>
       </div>
       <div class="field"><label>Cédula (opcional)</label><input class="input" name="cedula" inputmode="numeric" placeholder="Opcional — para no repetir compras"></div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label>Estado de pago</label>
+          <select class="input" name="estado_pago" id="sel-estado-pago" onchange="document.getElementById('campos-pago').style.display = this.value === 'pagado' ? 'grid' : 'none'; document.getElementById('campo-observacion-pago').style.display = this.value === 'pagado' ? 'block' : 'none';">
+            <option value="pendiente">⏳ Pendiente</option>
+            <option value="pagado">✅ Pagado</option>
+          </select>
+        </div>
+        <div id="campos-pago" style="display:none;">
+          <div class="field">
+            <label>Método de pago</label>
+            <select class="input" name="metodo_pago">
+              <option value="">Seleccionar...</option>
+              <option value="efectivo">💵 Efectivo</option>
+              <option value="transferencia">🏦 Transferencia</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="campo-observacion-pago" style="display:none;">
+        <div class="field">
+          <label>Observación del pago</label>
+          <input class="input" name="observacion" placeholder="Ej: Pago parcial, referencia, etc.">
+        </div>
+      </div>
 
       <div class="field">
         <label>¿Cómo se asigna el número?</label>
@@ -2075,7 +2169,7 @@ function modalRegistroMasivo(rifaId) {
   abrirModal(`
     <div class="modal__header"><h3>Registro masivo</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
     <div class="modal__body">
-      <p class="text-sm text-ink-600 mb-3">Pega una línea por participante. <strong>Nombre y Teléfono son obligatorios</strong>; la cédula es opcional.</p>
+      <p class="text-sm text-ink-600 mb-3">Pega una línea por participante. <strong>Nombre es obligatorio</strong>; teléfono y cédula son opcionales.</p>
       <p class="text-sm mb-2">Formatos válidos:</p>
       <ul class="text-sm text-ink-600 mb-3" style="padding-left:18px;">
         <li><code>Nombre, Teléfono</code> — ejemplo: <code>Juan Pérez, 3001234567</code></li>
@@ -3488,42 +3582,40 @@ function ticketDisplay(numero, simbolo) {
 // Genera y descarga el acta del sorteo como PDF (sin librerías externas)
 function descargarActaPDF(rifa, resultado) {
   const esChance = modoEsChance(rifa);
-  const lineas = [];
-  lineas.push('ACTA DE SORTEO');
-  lineas.push('RIFAS SYC');
-  lineas.push('------------------------------------------');
-  lineas.push('Rifa: ' + rifa.nombre);
-  lineas.push('Producto / premio: ' + rifa.producto);
-  lineas.push('Fecha programada del sorteo: ' + rifa.fecha_sorteo);
-  lineas.push('Fecha del acta: ' + new Date().toLocaleString('es-CO'));
-  lineas.push('');
+  let subtitulos = 'Rifa: ' + rifa.nombre + '\n';
+  subtitulos += 'Producto: ' + (rifa.producto || 'N/A') + '\n';
+  subtitulos += 'Sorteo: ' + (rifa.fecha_sorteo || 'N/A') + '\n';
+  subtitulos += 'Acta: ' + new Date().toLocaleString('es-CO');
+
+  let encabezados = ['#', 'Detalle'];
+  let anchoColumnas = [50, 515];
+  let filas = [];
+
   if (esChance) {
-    lineas.push('RESULTADO DEL CHANCE CON SIMBOLO');
-    lineas.push('Cifras sorteadas: ' + resultado.numero);
-    lineas.push('Simbolo: ' + resultado.simbolo);
-    lineas.push('Semilla: ' + resultado.semilla);
-    lineas.push('');
+    filas.push(['', 'RESULTADO: ' + resultado.numero + ' ' + resultado.simbolo]);
+    filas.push(['', 'Semilla: ' + resultado.semilla]);
     (resultado.premios || []).forEach(p => {
       if (!p.sorteado) return;
-      lineas.push((p.nombre || 'Premio') + ' (' + String(p.numero).padStart(2, '0') + ' ' + resultado.simbolo + '):');
-      lineas.push(p.ganador
-        ? '   GANADOR: ' + p.ganador.nombre + ' - Tel: ' + (p.ganador.telefono || '')
-        : '   SIN GANADOR');
-      lineas.push('');
+      const num = String(p.numero).padStart(2, '0');
+      const ganador = p.ganador ? p.ganador.nombre : 'SIN GANADOR';
+      filas.push([num, (p.nombre || 'Premio') + ': ' + ganador]);
     });
   } else {
-    lineas.push('BOLETA GANADORA: ' + resultado.numeroDisplay);
-    if (resultado.ganador) {
-      lineas.push('Ganador: ' + resultado.ganador.nombre);
-      lineas.push('Telefono: ' + (resultado.ganador.telefono || ''));
-    }
-    lineas.push('Semilla: ' + resultado.semilla);
+    filas.push(['', 'BOLETA GANADORA: ' + resultado.numeroDisplay]);
+    if (resultado.ganador) filas.push(['', 'Ganador: ' + resultado.ganador.nombre]);
+    filas.push(['', 'Semilla: ' + resultado.semilla]);
   }
-  lineas.push('');
-  lineas.push('El ganador debe reclamar presentando la boleta original');
-  lineas.push('y su documento de identidad.');
+  filas.push(['', '']);
+  filas.push(['', 'El ganador debe reclamar presentando la boleta original']);
+  filas.push(['', 'y su documento de identidad.']);
 
-  const bytes = crearPDF(lineas);
+  const bytes = crearPDF({
+    titulo: 'ACTA DE SORTEO - RIFAS SYC',
+    subtitulo: subtitulos,
+    encabezados: encabezados,
+    filas: filas,
+    anchoColumnas: anchoColumnas
+  });
   const blob = new Blob([bytes], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3535,45 +3627,159 @@ function descargarActaPDF(rifa, resultado) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-// PDF mínimo (Helvetica, WinAnsi). Devuelve un Uint8Array listo para el Blob.
-function crearPDF(lineas) {
-  const esc = (t) => {
-    let out = '';
-    for (const ch of String(t)) {
-      const c = ch.charCodeAt(0);
-      if (c === 40) out += '\\(';
-      else if (c === 41) out += '\\)';
-      else if (c === 92) out += '\\\\';
-      else if (c > 255) out += '?';
-      else out += ch;
-    }
-    return out;
+// PDF multipágina con tablas (Helvetica, WinAnsi). Devuelve Uint8Array.
+function crearPDF(opts) {
+  const { titulo, subtitulo, encabezados, filas, anchoColumnas } = opts;
+  const ML = 40, TOP = 790, BOT = 50, LH = 14, PW = 595;
+  const CW = PW - 80;
+
+  const WINANSI = {
+    0x20AC:0x80, 0x201A:0x82, 0x201E:0x84, 0x2026:0x85,
+    0x2020:0x86, 0x2021:0x87, 0x2039:0x8B, 0x2018:0x91,
+    0x2019:0x92, 0x201C:0x93, 0x201D:0x94, 0x2022:0x95,
+    0x2013:0x96, 0x2014:0x97, 0x203A:0x9B, 0x0160:0x8A,
+    0x0152:0x8C, 0x017D:0x8E, 0x0161:0x9A, 0x0153:0x9C,
+    0x017E:0x9E, 0x0178:0x9F, 0x02C6:0x88, 0x02DC:0x98,
+    0x2122:0x99
   };
-  let cont = 'BT\n/F1 12 Tf\n50 790 Td\n18 TL\n';
-  lineas.forEach(l => { cont += '(' + esc(l) + ") Tj\n0 -18 Td\n"; });
-  cont += 'ET\n';
 
-  const objs = {};
-  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
-  objs[2] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
-  objs[3] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>';
-  objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
-  objs[5] = '<< /Length ' + cont.length + ' >>\nstream\n' + cont + 'endstream';
+  const toWinAnsi = (txt) => {
+    const bytes = [];
+    for (const ch of String(txt)) {
+      const cp = ch.codePointAt(0);
+      if (cp === 40) { bytes.push(0x5C, 0x28); }
+      else if (cp === 41) { bytes.push(0x5C, 0x29); }
+      else if (cp === 92) { bytes.push(0x5C, 0x5C); }
+      else if (WINANSI[cp] !== undefined) { bytes.push(WINANSI[cp]); }
+      else if (cp <= 0xFF) { bytes.push(cp); }
+      else { bytes.push(0x3F); }
+    }
+    return bytes;
+  };
 
-  let pdf = '%PDF-1.4\n';
-  const offsets = [0];
-  for (let i = 1; i <= 5; i++) {
-    offsets[i] = pdf.length;
-    pdf += i + ' 0 obj\n' + objs[i] + '\nendobj\n';
+  let curY = TOP;
+  const pageStreams = [];
+  let curBuf = [];
+
+  const textAt = (x, y, size, txt) => {
+    const b = [];
+    b.push(...strToBytes('BT /F1 ' + size + ' Tf ' + x + ' ' + y + ' Td ('));
+    b.push(...toWinAnsi(txt));
+    b.push(...strToBytes(') Tj ET\n'));
+    return b;
+  };
+
+  const lineAt = (x1, y1, x2, y2) => {
+    return strToBytes('q 0.5 w ' + x1 + ' ' + y1 + ' m ' + x2 + ' ' + y2 + ' l S Q\n');
+  };
+
+  const strToBytes = (s) => {
+    const b = [];
+    for (let i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xFF);
+    return b;
+  };
+
+  const newPage = () => {
+    if (curBuf.length) pageStreams.push(curBuf);
+    curBuf = [];
+    curY = TOP;
+  };
+
+  const checkPage = (need) => {
+    if (curY < BOT + need) newPage();
+  };
+
+  // Titulo
+  if (titulo) {
+    checkPage(LH * 2);
+    curBuf.push(...textAt(ML, curY, 16, titulo));
+    curY -= LH + 4;
   }
-  const xref = pdf.length;
-  pdf += 'xref\n0 6\n0000000000 65535 f \n';
-  for (let i = 1; i <= 5; i++) pdf += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
-  pdf += 'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF';
+  if (subtitulo) {
+    subtitulo.split('\n').forEach(l => {
+      checkPage(LH);
+      curBuf.push(...textAt(ML, curY, 10, l));
+      curY -= LH;
+    });
+    curY -= 6;
+  }
 
-  const bytes = new Uint8Array(pdf.length);
-  for (let i = 0; i < pdf.length; i++) bytes[i] = pdf.charCodeAt(i) & 0xFF;
-  return bytes;
+  // Encabezados de tabla
+  if (encabezados && encabezados.length) {
+    const widths = anchoColumnas || encabezados.map(() => CW / encabezados.length);
+    checkPage(LH * 3);
+
+    let x = ML;
+    encabezados.forEach((h, i) => {
+      curBuf.push(...textAt(x, curY, 8, h.toUpperCase()));
+      x += widths[i];
+    });
+    curY -= LH;
+    curBuf.push(...lineAt(ML, curY + 3, ML + CW, curY + 3));
+    curY -= 6;
+
+    // Filas
+    (filas || []).forEach(f => {
+      checkPage(LH);
+      let rx = ML;
+      f.forEach((c, i) => {
+        const maxChars = Math.floor(widths[i] / 5.5);
+        const txt = String(c || '').substring(0, maxChars);
+        curBuf.push(...textAt(rx, curY, 9, txt));
+        rx += widths[i];
+      });
+      curY -= LH;
+    });
+  }
+
+  if (curBuf.length) pageStreams.push(curBuf);
+
+  // --- Construir PDF multipágina ---
+  let oid = 3;
+  const objs = {
+    1: strToBytes('<< /Type /Catalog /Pages 2 0 R >>'),
+    2: null,
+    3: strToBytes('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>')
+  };
+
+  const pageIds = [];
+  pageStreams.forEach(sc => {
+    oid++;
+    const contentId = oid;
+    objs[contentId] = strToBytes('<< /Length ' + sc.length + ' >>\nstream\n');
+    objs[contentId] = objs[contentId].concat(sc, strToBytes('\nendstream'));
+    oid++;
+    const pageId = oid;
+    objs[pageId] = strToBytes('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ' + contentId + ' 0 R >>');
+    pageIds.push(pageId);
+  });
+
+  objs[2] = strToBytes('<< /Type /Pages /Kids [' + pageIds.map(p => p + ' 0 R').join(' ') + '] /Count ' + pageIds.length + ' >>');
+
+  // Concatenar todo
+  const pdfParts = [strToBytes('%PDF-1.4\n')];
+  const offsets = [0];
+  for (let i = 1; i <= oid; i++) {
+    offsets[i] = pdfParts.reduce((a, p) => a + p.length, 0);
+    pdfParts.push(strToBytes(i + ' 0 obj\n'));
+    pdfParts.push(objs[i]);
+    pdfParts.push(strToBytes('\nendobj\n'));
+  }
+  const xrefPos = pdfParts.reduce((a, p) => a + p.length, 0);
+  pdfParts.push(strToBytes('xref\n0 ' + (oid + 1) + '\n0000000000 65535 f \n'));
+  for (let i = 1; i <= oid; i++) {
+    pdfParts.push(strToBytes(String(offsets[i]).padStart(10, '0') + ' 00000 n \n'));
+  }
+  pdfParts.push(strToBytes('trailer\n<< /Size ' + (oid + 1) + ' /Root 1 0 R >>\nstartxref\n' + xrefPos + '\n%%EOF'));
+
+  const totalLen = pdfParts.reduce((a, p) => a + p.length, 0);
+  const result = new Uint8Array(totalLen);
+  let pos = 0;
+  for (const part of pdfParts) {
+    result.set(part, pos);
+    pos += part.length;
+  }
+  return result;
 }
 
 // Exporta un reporte completo de la rifa como PDF
@@ -3584,67 +3790,28 @@ async function exportarReportePDF(rifaId) {
 
   const pagados = participantes.filter(p => p.estado_pago === 'pagado');
   const pendientes = participantes.filter(p => p.estado_pago === 'pendiente');
-  const lineas = [];
-  const separador = '==========================================';
-
-  lineas.push('REPORTE COMPLETO DE RIFA');
-  lineas.push('RIFAS SYC');
-  lineas.push(separador);
-  lineas.push('Rifa: ' + rifa.nombre);
-  lineas.push('Producto/Premio: ' + (rifa.producto || ''));
-  lineas.push('Modalidad: ' + (rifa.modalidad_boleta || 'BOLETAS_NORMAL'));
-  lineas.push('Estado: ' + rifa.estado);
-  lineas.push('Fecha sorteo: ' + (rifa.fecha_sorteo || 'No programada'));
-  lineas.push('Rango: ' + rifa.rango_min + ' - ' + rifa.rango_max);
-  lineas.push('Precio boleta: $' + Number(rifa.precio_boleta || 0).toLocaleString('es-CO'));
-  lineas.push('Total boletas: ' + participantes.length);
-  lineas.push('Vendidas (pagadas): ' + pagados.length);
-  lineas.push('Pendientes: ' + pendientes.length);
   const recaudado = pagados.length * Number(rifa.precio_boleta || 0);
-  lineas.push('Recaudado: $' + recaudado.toLocaleString('es-CO'));
-  if (rifa.modalidad_premio === '50_50') {
-    const porcentaje = rifa.porcentaje_organizador || 50;
-    lineas.push('Modalidad: 50/50');
-    lineas.push('Organizador (' + porcentaje + '%): $' + Math.round(recaudado * porcentaje / 100).toLocaleString('es-CO'));
-    lineas.push('Ganador (' + (100 - porcentaje) + '%): $' + Math.round(recaudado * (100 - porcentaje) / 100).toLocaleString('es-CO'));
-  }
-  lineas.push('Reporte generado: ' + new Date().toLocaleString('es-CO'));
-  lineas.push('');
 
-  if (ganadores.length) {
-    lineas.push(separador);
-    lineas.push('GANADORES');
-    lineas.push(separador);
-    ganadores.forEach((g, i) => {
-      lineas.push((i + 1) + '. Numero: ' + g.numero + ' | Ganador: ' + g.nombre + ' | Modalidad: ' + g.modalidad);
-      if (g.semilla) lineas.push('   Semilla: ' + g.semilla);
-    });
-    lineas.push('');
-  }
+  const subtitulos = [
+    'Rifa: ' + rifa.nombre,
+    'Producto: ' + (rifa.producto || 'N/A'),
+    'Estado: ' + rifa.estado + ' | Sorteo: ' + (rifa.fecha_sorteo || 'No programada'),
+    'Rango: ' + rifa.rango_min + ' - ' + rifa.rango_max + ' | Precio: $' + Number(rifa.precio_boleta || 0).toLocaleString('es-CO'),
+    'Vendidas: ' + pagados.length + ' | Pendientes: ' + pendientes.length + ' | Recaudado: $' + recaudado.toLocaleString('es-CO'),
+    'Generado: ' + new Date().toLocaleString('es-CO')
+  ].join('\n');
 
-  lineas.push(separador);
-  lineas.push('BOLETAS PAGADAS (' + pagados.length + ')');
-  lineas.push(separador);
-  pagados.forEach(p => {
-    lineas.push('#' + p.numero + ' | ' + (p.nombre || '') + ' | Tel: ' + (p.telefono || '') + ' | Cedula: ' + (p.cedula || ''));
+  const encabezados = ['Numero', 'Nombre'];
+  const anchoColumnas = [80, 485];
+  const filasPagados = pagados.map(p => [String(p.numero ?? ''), (p.nombre || '').substring(0, 60)]);
+
+  const bytes = crearPDF({
+    titulo: 'REPORTE DE RIFA - RIFAS SYC',
+    subtitulo: subtitulos,
+    encabezados: encabezados,
+    filas: filasPagados,
+    anchoColumnas: anchoColumnas
   });
-  lineas.push('');
-
-  if (pendientes.length) {
-    lineas.push(separador);
-    lineas.push('BOLETAS PENDIENTES (' + pendientes.length + ')');
-    lineas.push(separador);
-    pendientes.forEach(p => {
-      lineas.push('#' + p.numero + ' | ' + (p.nombre || '') + ' | Tel: ' + (p.telefono || ''));
-    });
-    lineas.push('');
-  }
-
-  lineas.push(separador);
-  lineas.push('FIN DEL REPORTE');
-  lineas.push('Rifas SYC - ' + new Date().getFullYear());
-
-  const bytes = crearPDF(lineas);
   const blob = new Blob([bytes], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3931,8 +4098,8 @@ async function renderHistorialTab(rifa, box) {
     <div class="card">
       ${historial.length === 0 ? `<div class="empty-state"><div class="icon">🕓</div><p>Sin eventos aún</p></div>` : `
       <table class="tbl">
-        <thead><tr><th>Fecha</th><th>Acción</th><th>Detalle</th></tr></thead>
-        <tbody>${historial.map(h => `<tr><td class="text-xs">${fmtFecha(h.fecha)}</td><td><strong>${h.accion}</strong></td><td class="text-sm">${escapeHtml(h.detalle)}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>Fecha y Hora</th><th>Acción</th><th>Detalle</th><th>Quién</th></tr></thead>
+        <tbody>${historial.map(h => `<tr><td class="text-xs" style="white-space:nowrap;">${fmtFecha(h.fecha)} ${h.fecha ? (h.fecha.length > 10 ? h.fecha.slice(11, 16) : '') : ''}</td><td><strong>${h.accion}</strong></td><td class="text-sm">${escapeHtml(h.detalle)}</td><td class="text-sm">${escapeHtml(h.usuario || '—')}</td></tr>`).join('')}</tbody>
       </table>`}
     </div>`;
 }

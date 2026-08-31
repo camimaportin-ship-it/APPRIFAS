@@ -651,12 +651,37 @@ function asegurarGrupos(rifa) {
   if (rifa.grupos_numeros) {
     try { grupos = JSON.parse(rifa.grupos_numeros); } catch (e) { grupos = []; }
   }
-  if (!Array.isArray(grupos) || grupos.length === 0) {
+  // Regenerar si: no hay grupos, o el tamaño no coincide con n_oportunidades actual
+  if (!Array.isArray(grupos) || grupos.length === 0 || (grupos.length > 0 && Array.isArray(grupos[0]) && grupos[0].length !== n)) {
     grupos = generarGruposMultiples(n);
     db.prepare('UPDATE rifas SET grupos_numeros = ? WHERE id = ?').run(JSON.stringify(grupos), rifa.id);
     rifa.grupos_numeros = JSON.stringify(grupos);
   }
   return grupos;
+}
+
+// Asegura que la tabla numeros tenga los números correctos para el rango de la rifa.
+// Si hay números vendidos/pagados, NO los toca — solo agrega los que faltan o los que sobran.
+function asegurarNumeros(rifa) {
+  const min = Number(rifa.rango_min) || 0;
+  const max = Number(rifa.rango_max) || 99;
+  const existentes = db.prepare('SELECT numero FROM numeros WHERE rifa_id = ?').all(rifa.id).map(r => r.numero);
+  const existSet = new Set(existentes);
+  // Agregar números que faltan
+  const insert = db.prepare("INSERT OR IGNORE INTO numeros (rifa_id, numero, estado) VALUES (?,?, 'libre')");
+  const insertarFaltantes = db.transaction(() => {
+    for (let n = min; n <= max; n++) {
+      if (!existSet.has(n)) insert.run(rifa.id, n);
+    }
+  });
+  insertarFaltantes();
+  // Eliminar números fuera del rango (solo si están libres — los vendidos se conservan)
+  if (existentes.length) {
+    const fueraRango = existentes.filter(n => n < min || n > max);
+    if (fueraRango.length) {
+      db.prepare('DELETE FROM numeros WHERE rifa_id = ? AND numero IN (' + fueraRango.map(() => '?').join(',') + ') AND estado = \'libre\'').run(rifa.id, ...fueraRango);
+    }
+  }
 }
 
 // Estado de un grupo de 4 Oportunidades. Un grupo cuenta como vendido
@@ -1034,7 +1059,7 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
       b.nombre, parseInt(b.valor_boleta, 10), b.producto, b.descripcion || '', b.fecha_sorteo,
       b.hora_sorteo || null, imagen_producto, banner_empresa, cantidad_max_participantes, rango_min, rango_max,
       b.tipo_rifa || 'aleatoria', b.mensaje_whatsapp || '', b.estado || 'borrador',
-      parseInt(b.auto_liberar_horas || 24, 10),
+      parseInt(b.auto_liberar_horas || 0, 10),
       b.modalidad_boleta || 'BOLETAS_NORMAL', b.modo_asignacion || 'AL_AZAR',
       chance ? JSON.stringify(simbolos) : null,
       b.premio1_nombre || 'Premio 1',       b.premio2_nombre || 'Premio 2', b.premio3_nombre || 'Premio 3',
@@ -1138,7 +1163,7 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
   db.prepare(`UPDATE rifas SET nombre=?, valor_boleta=?, producto=?, descripcion=?, fecha_sorteo=?, hora_sorteo=?,
       imagen_producto=?, banner_empresa=?, tipo_rifa=?, mensaje_whatsapp=?, estado=?, auto_liberar_horas=?,
       modalidad_boleta=?, modo_asignacion=?, simbolos=?, premio1_nombre=?, premio2_nombre=?, premio3_nombre=?, premio4_nombre=?, cifras=?, revancha_permitida=?,
-      rango_min=?, rango_max=?, cantidad_max_participantes=?, modalidad_premio=?, porcentaje_organizador=?
+      rango_min=?, rango_max=?, cantidad_max_participantes=?, modalidad_premio=?, porcentaje_organizador=?, n_oportunidades=?
       WHERE id=?`).run(
     b.nombre ?? rifa.nombre, b.valor_boleta ?? rifa.valor_boleta, b.producto ?? rifa.producto,
     b.descripcion ?? rifa.descripcion, b.fecha_sorteo ?? rifa.fecha_sorteo, b.hora_sorteo ?? rifa.hora_sorteo,
@@ -1158,6 +1183,7 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
     b.cantidad_max_participantes ?? rifa.cantidad_max_participantes,
     b.modalidad_premio ?? rifa.modalidad_premio ?? 'completo',
     b.porcentaje_organizador ?? rifa.porcentaje_organizador ?? 0,
+    b.n_oportunidades !== undefined ? parseInt(b.n_oportunidades, 10) || null : rifa.n_oportunidades,
     req.params.id
   );
   if (b.estado && b.estado !== rifa.estado) registrarHistorial(req.params.id, 'cambio-estado', `${rifa.estado} -> ${b.estado}`, req.usuario.usuario);
@@ -1165,18 +1191,54 @@ app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'b
   const cambiados = camposConfig.filter(c => b[c] !== undefined && String(b[c]) !== String(rifa[c]));
   if (cambiados.length) registrarHistorial(req.params.id, 'config', `Configuración actualizada: ${cambiados.join(', ')}`, req.usuario.usuario);
   const rifaEditada = getRifa(req.params.id);
-  // Si se convierte a CHANCE sin boletas pre-generadas, generarlas
+  const modalidadCambio = rifa.modalidad_boleta !== rifaEditada.modalidad_boleta;
+
+  // --- Regenerar datos derivados según modalidad ---
+
+  // BOLETAS_NORMAL / CUATRO_OPORTUNIDADES: asegurar números en tabla numeros
+  if (rifaEditada.modalidad_boleta === 'BOLETAS_NORMAL' || rifaEditada.modalidad_boleta === 'CUATRO_OPORTUNIDADES') {
+    asegurarNumeros(rifaEditada);
+  }
+
+  // CHANCE: regenerar boletas_chance si cambiaron simbolos o cifras
   if (esChance(rifaEditada)) {
     const cuantas = db.prepare('SELECT COUNT(*) c FROM boletas_chance WHERE rifa_id = ?').get(req.params.id).c;
-    if (cuantas === 0) generarBoletasChance(rifaEditada);
+    if (cuantas === 0 || modalidadCambio || b.simbolos !== undefined || b.cifras !== undefined) {
+      if (cuantas > 0) db.prepare('DELETE FROM boletas_chance WHERE rifa_id = ?').run(req.params.id);
+      generarBoletasChance(rifaEditada);
+    }
   }
-  if (nOportunidades(rifaEditada)) {
+
+  // CUATRO_OPORTUNIDADES: asegurar grupos
+  if (rifaEditada.modalidad_boleta === 'CUATRO_OPORTUNIDADES') {
     const grupos = asegurarGrupos(rifaEditada);
-    // Si se cambió la modalidad, la anterior (A_ELECCION/AL_AZAR) pierde validez
-    if (nOportunidades(rifa) === 0 && grupos.length) {
+    if (modalidadCambio && grupos.length) {
       registrarHistorial(req.params.id, 'config', 'Grupos de múltiples oportunidades generados', req.usuario.usuario);
     }
   }
+
+  // OPORTUNIDADES_4D: asegurar grupos 4D
+  if (rifaEditada.modalidad_boleta === 'OPORTUNIDADES_4D') {
+    asegurarGrupos(rifaEditada);
+  }
+
+  // --- Limpiar datos huérfanos al cambiar modalidad ---
+  if (modalidadCambio) {
+    // Si salió de CUATRO_OPORTUNIDADES, limpiar grupos_numeros
+    if (rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES' && rifaEditada.modalidad_boleta !== 'CUATRO_OPORTUNIDADES') {
+      db.prepare('UPDATE rifas SET grupos_numeros = NULL WHERE id = ?').run(req.params.id);
+    }
+    // Si salió de CHANCE, limpiar boletas_chance
+    if (esChance(rifa) && !esChance(rifaEditada)) {
+      db.prepare('DELETE FROM boletas_chance WHERE rifa_id = ?').run(req.params.id);
+    }
+    // Si salió de OPORTUNIDADES_4D, limpiar grupos_numeros
+    if (rifa.modalidad_boleta === 'OPORTUNIDADES_4D' && rifaEditada.modalidad_boleta !== 'OPORTUNIDADES_4D') {
+      db.prepare('UPDATE rifas SET grupos_numeros = NULL WHERE id = ?').run(req.params.id);
+    }
+    registrarHistorial(req.params.id, 'config', `Modalidad cambiada: ${rifa.modalidad_boleta} -> ${rifaEditada.modalidad_boleta}`, req.usuario.usuario);
+  }
+
   res.json(rifaEditada);
 });
 
@@ -1380,7 +1442,7 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
   const rifa = getRifa(rifaId);
   if (!rifa) return res.status(404).json({ error: 'Rifa no encontrada' });
 
-  const { nombre, cedula, telefono, numero, numeros, simbolo, boleta_id } = req.body;
+  const { nombre, cedula, telefono, numero, numeros, simbolo, boleta_id, estado_pago, metodo_pago, observacion } = req.body;
   const nombreLimpio = limpiarTexto(nombre);
   const cedulaLimpia = limpiarCedula(cedula);
   const telefonoLimpio = limpiarTelefono(telefono);
@@ -1488,12 +1550,14 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
       }
     }
     elegidos.sort((a, b) => a - b);
+    const pagoEstado = ['pagado', 'pendiente'].includes(estado_pago) ? estado_pago : 'pendiente';
+    const pagoFecha = pagoEstado === 'pagado' ? new Date().toISOString() : null;
     const info = chance
-      ? db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, simbolo, numeros) VALUES (?,?,?,?,?,?,?)')
+      ? db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, simbolo, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
           .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], simboloElegido,
-            JSON.stringify([ticketLabel(elegidos[0], simboloElegido, rifa)]))
-      : db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, numeros) VALUES (?,?,?,?,?,?)')
-          .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], JSON.stringify(elegidos));
+            JSON.stringify([ticketLabel(elegidos[0], simboloElegido, rifa)]), pagoEstado, pagoFecha, metodo_pago || null, observacion || null)
+      : db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], JSON.stringify(elegidos), pagoEstado, pagoFecha, metodo_pago || null, observacion || null);
     if (chance) {
       db.prepare("UPDATE boletas_chance SET estado='pendiente', participante_id=?, fecha_reservado=datetime('now','localtime') WHERE id=?")
         .run(info.lastInsertRowid, boletaChance.id);
@@ -1565,11 +1629,12 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
     for (const linea of lineas) {
       const partes = linea.split(/[,;\t]|(?:\s-\s)/).map(p => p.trim()).filter(Boolean);
       // Formatos válidos:
+      //   "Nombre"                       -> partes.length === 1
       //   "Nombre, Teléfono"            -> partes.length === 2
       //   "Nombre, Cédula, Teléfono"    -> partes.length >= 3 (el teléfono es el último)
-      if (partes.length < 2) { resultado.errores.push(linea); continue; }
+      if (partes.length < 1) { resultado.errores.push(linea); continue; }
 
-      const telefono = limpiarTelefono(partes[partes.length - 1]);
+      const telefono = partes.length >= 2 ? limpiarTelefono(partes[partes.length - 1]) : '';
       let cedula = '', nombre;
       if (partes.length >= 3) {
         cedula = limpiarCedula(partes[partes.length - 2]);
@@ -1641,15 +1706,13 @@ app.put('/api/participantes/:id', (req, res) => {
   const cedula = limpiarCedula(b.cedula);
   const telefono = limpiarTelefono(b.telefono);
 
-  // Si llega algún dato de contacto, debe venir completo (nombre y teléfono obligatorios)
+  // Si llega algún dato de contacto, nombre es obligatorio; teléfono es opcional
   if (b.nombre !== undefined || b.cedula !== undefined || b.telefono !== undefined) {
-    if (!nombre || !telefono) return res.status(400).json({ error: 'Nombre y teléfono son obligatorios' });
-    // Evitar duplicados en la misma rifa: por cédula (si se da) o por teléfono
-    const clave = cedula ? 'C:' + cedula : 'T:' + telefono;
-    const otros = db.prepare('SELECT cedula, telefono FROM participantes WHERE rifa_id = ? AND id != ?').all(p.rifa_id, req.params.id)
-      .map(r => (r.cedula ? 'C:' + r.cedula : 'T:' + r.telefono));
-    if (otros.includes(clave)) {
-      return res.status(409).json({ error: cedula ? 'Ya existe un participante con esa cédula en esta rifa' : 'Ya existe un participante con ese teléfono en esta rifa' });
+    if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio' });
+    // Evitar duplicados por cédula (si se da)
+    if (cedula) {
+      const dupC = db.prepare('SELECT id FROM participantes WHERE rifa_id = ? AND cedula = ? AND id != ?').get(p.rifa_id, cedula, req.params.id);
+      if (dupC) return res.status(409).json({ error: 'Ya existe un participante con esa cédula en esta rifa' });
     }
     db.prepare('UPDATE participantes SET nombre=?, cedula=?, telefono=? WHERE id=?')
       .run(nombre, cedula, telefono, req.params.id);
@@ -1659,8 +1722,10 @@ app.put('/api/participantes/:id', (req, res) => {
   if (b.estado_pago !== undefined) {
     const { estado_pago } = b;
     if (!['pagado', 'pendiente'].includes(estado_pago)) return res.status(400).json({ error: 'estado_pago inválido' });
-    db.prepare('UPDATE participantes SET estado_pago=?, fecha_pago=? WHERE id=?')
-      .run(estado_pago, estado_pago === 'pagado' ? new Date().toISOString() : null, req.params.id);
+    const metodoPago = b.metodo_pago || null;
+    const observacion = b.observacion || null;
+    db.prepare('UPDATE participantes SET estado_pago=?, fecha_pago=?, metodo_pago=?, observacion=? WHERE id=?')
+      .run(estado_pago, estado_pago === 'pagado' ? new Date().toISOString() : null, metodoPago, observacion, req.params.id);
     // Actualiza TODOS los números de la boleta (1 normal / 4 en CUATRO_OPORTUNIDADES)
     db.prepare('UPDATE numeros SET estado=? WHERE participante_id=?')
       .run(estado_pago, req.params.id);

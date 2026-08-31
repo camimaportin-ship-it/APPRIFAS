@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS rifas (
   tipo_rifa TEXT NOT NULL DEFAULT 'aleatoria',
   mensaje_whatsapp TEXT,
   estado TEXT NOT NULL DEFAULT 'borrador',
-  auto_liberar_horas INTEGER DEFAULT 24,
+  auto_liberar_horas INTEGER DEFAULT 0,
   grupos_numeros TEXT,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
@@ -376,6 +376,12 @@ CREATE INDEX IF NOT EXISTS idx_sorteos_aud_fecha ON sorteos_auditoria(fecha);
     db.exec(`ALTER TABLE logs ADD COLUMN usuario TEXT`);
   if (!tieneColumna(db, 'historial', 'usuario'))
     db.exec(`ALTER TABLE historial ADD COLUMN usuario TEXT`);
+
+  // Migración: método de pago y observación en participantes
+  if (!tieneColumna(db, 'participantes', 'metodo_pago'))
+    db.exec(`ALTER TABLE participantes ADD COLUMN metodo_pago TEXT`);
+  if (!tieneColumna(db, 'participantes', 'observacion'))
+    db.exec(`ALTER TABLE participantes ADD COLUMN observacion TEXT`);
 
   const admins = [
     { usuario: 'hans4269', nombre: 'Hans Admin', password: 'Rifas01234' },

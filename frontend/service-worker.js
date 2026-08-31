@@ -6,9 +6,9 @@
 // (esta app corre en la misma red/máquina, así que "offline" aquí significa
 // "sin internet", no "sin el propio servidor").
 // -----------------------------------------------------------------------------
-const CACHE_NAME = 'rifas-syc-shell-v6';
+const CACHE_NAME = 'rifas-syc-shell-v7';
 const APP_SHELL = [
-  '/', '/index.html', '/style.css', '/app.js',
+  '/', '/index.html', '/style.css',
   '/components/RuletaCanvas.js', '/components/GeneradorImagen.js',
   '/components/BaloteraCanvas.js',
   '/vendor/canvas-confetti.js', '/vendor/chart.umd.js', '/manifest.json',
