@@ -277,6 +277,11 @@ function toast(msg, tipo = 'success') {
   document.getElementById('toast-container').appendChild(el);
   setTimeout(() => el.remove(), 3800);
 }
+function copiarLinkPublico(url){ navigator.clipboard.writeText(url).then(()=>toast('Link copiado')).catch(()=>{ const i=document.getElementById('input-link-publico'); if(i){i.select(); document.execCommand('copy'); toast('Link copiado');}}); }
+async function generarReferido(rifaId){ const input=document.getElementById('input-ref-codigo'); const codigo=(input?.value||'').trim(); try{ const r=await api('/referidos/generar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rifa_id:rifaId,codigo:codigo||undefined})}); if(input) input.value=r.codigo; toast('Código '+r.codigo+' generado'); }catch(e){ toast(e.message,'error'); } }
+function copiarLinkReferido(rifaId){ const input=document.getElementById('input-ref-codigo'); const code=(input?.value||'').trim(); const url=window.location.origin+'/r/'+rifaId+(code?'?ref='+encodeURIComponent(code):''); copiarLinkPublico(url); }
+async function verPagos(rifaId){ const box=document.getElementById('pagos-lista'); if(!box) return; box.innerHTML='<p class="text-sm text-ink-600">Cargando pagos...</p>'; try{ const pagos=await api('/rifas/'+rifaId+'/pagos'); if(!pagos.length) box.innerHTML='<p class="text-sm text-ink-600">Sin pagos aún. Usa el checkout Wompi en Participantes.</p>'; else box.innerHTML='<div class="table-wrap"><table class="tbl"><thead><tr><th>Ref</th><th>Participante</th><th>Monto</th><th>Estado</th></tr></thead><tbody>'+pagos.map(p=>`<tr><td class="mono text-xs">${escapeHtml(p.referencia)}</td><td>${escapeHtml(p.nombre)}</td><td>${fmtCOP(p.monto)}</td><td><span class="badge badge-${p.estado==='aprobado'?'pagado':p.estado}">${p.estado}</span></td></tr>`).join('')+'</tbody></table></div>'; }catch(e){ box.innerHTML='<p class="text-sm" style="color:var(--red-500);">'+escapeHtml(e.message)+'</p>'; } }
+async function iniciarCheckout(rifaId, participanteId){ try{ const r=await api('/rifas/'+rifaId+'/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({participante_id:participanteId})}); if(r.checkoutUrl) window.open(r.checkoutUrl,'_blank'); else { if(confirm('Wompi no configurado (stub). ¿Simular pago aprobado?')){ await fetch('/api/webhooks/wompi',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({referencia:r.referencia,estado:'aprobado'})}); toast('Pago simulado aprobado'); verPagos(rifaId); } } }catch(e){ toast(e.message,'error'); } }
 
 // Números por boleta en rifas de múltiples oportunidades (2, 4 o 5; 0 si no aplica)
 function nOport(rifa) {
@@ -1320,6 +1325,26 @@ async function renderResumen(rifa, d) {
       </div>
     </div>
 
+    <div class="card card-pad mb-4" style="border:1.5px solid #D4A017; background:linear-gradient(135deg,#FFFBEB,#FFFFFF);">
+      <h3 class="mb-3">🔗 Compartir y referidos</h3>
+      <div class="flex gap-2 mb-3" style="align-items:center;">
+        <input class="input" id="input-link-publico" readonly value="${window.location.origin}/r/${rifa.id}" onclick="this.select()" style="flex:1;">
+        <button class="btn btn-gold btn-sm" onclick="copiarLinkPublico('${window.location.origin}/r/${rifa.id}')">📋 Copiar link</button>
+        <a class="btn btn-outline btn-sm" target="_blank" href="/r/${rifa.id}">Abrir landing</a>
+      </div>
+      <div class="flex gap-2 mb-2">
+        <input class="input" id="input-ref-codigo" placeholder="Código referido (ej. HANS10)" style="flex:1; max-width:180px;">
+        <button class="btn btn-outline btn-sm" onclick="generarReferido(${rifa.id})">🎁 Generar código</button>
+        <button class="btn btn-outline btn-sm" onclick="copiarLinkReferido(${rifa.id})">📋 Copiar con ref</button>
+      </div>
+      <p class="text-xs text-ink-600">El link <code>/r/:id</code> tiene OG tags y redirige a <code>/#/rifas/:id</code>. Usa <code>?ref=CODIGO</code> para tracking.</p>
+      <div class="flex gap-2 mt-3">
+        <button class="btn btn-outline btn-sm" onclick="verPagos(${rifa.id})">💳 Ver pagos Wompi</button>
+        <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/og-image" target="_blank">🖼️ Ver OG image</a>
+      </div>
+      <div id="pagos-lista" class="mt-3"></div>
+    </div>
+
     <div class="grid-2">
       <div class="card card-pad">
         <h3 class="mb-3">Datos del premio</h3>
@@ -1461,6 +1486,7 @@ async function renderParticipantesTab(rifa, box) {
               </td>
               <td class="text-xs text-ink-600">${fmtFecha(p.fecha_registro)}</td>
               <td class="flex gap-2">
+                ${p.estado_pago === 'pendiente' ? `<button class="btn btn-gold btn-sm" title="Pagar con Wompi" onclick="iniciarCheckout(${rifa.id}, ${p.id})">💳</button>` : ''}
                 ${p.estado_pago === 'pendiente' ? `<button class="btn btn-ghost btn-sm" title="Enviar recordatorio" onclick='recordatorioWhatsapp(${safeAttr({ nombre: p.nombre, numeros: p.numeros || [p.numero], rifa_nombre: rifa.nombre, valor: rifa.valor_boleta, telefono: p.telefono })})'>💬</button>` : ''}
                 ${rifa.estado === 'activa' ? `<button class="btn btn-ghost btn-sm" title="Editar datos del participante" onclick='modalEditarParticipante(${rifa.id}, ${safeAttr({ id: p.id, nombre: p.nombre, telefono: p.telefono, cedula: p.cedula, numeros: p.numeros || [p.numero], estado_pago: p.estado_pago })})'>✏️</button>` : ''}
                 <button class="btn btn-ghost btn-sm" title="Eliminar / liberar número" onclick="eliminarParticipante(${p.id}, ${rifa.id})">🗑️</button>

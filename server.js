@@ -80,6 +80,10 @@ const uploadsDir = path.join(__dirname, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 
+// Health — Fase 2
+app.get('/health', (req, res) => res.json({ ok: true, version: '2.2.0', uptime: process.uptime(), db: fs.existsSync(dbPath) ? 'ok' : 'missing' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: '2.2.0' }));
+
 // SEO — Fase 2.3
 app.get('/robots.txt', (req, res) => res.sendFile(path.join(__dirname, 'frontend', 'robots.txt')));
 app.get('/sitemap.xml', (req, res) => {
@@ -440,9 +444,17 @@ app.delete('/api/sesiones/:tokenPrefix', requireRole('super_admin', 'admin'), (r
 });
 
 // ------------------------------ MULTER (uploads) -----------------------------
-// Fase 2.3 — sharp: re-encode a webp/jpg y resize a 1200px para no servir 8MB tal cual
+// Fase 2.3 — sharp: re-encode y resize a 1200px para no servir 8MB tal cual
 let sharp = null;
 try { sharp = require('sharp'); } catch (e) {}
+function optimizeInBackground(file) {
+  if (!sharp || !file || !file.path) return;
+  const p = file.path;
+  // fire-and-forget, no bloquea la respuesta
+  sharp(p).resize({ width: 1200, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer()
+    .then(buf => { try { fs.writeFileSync(p, buf); } catch(e){} })
+    .catch(()=>{});
+}
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
@@ -974,11 +986,12 @@ app.get('/api/changelog', (req, res) => {
       ]
     }
   ];
-  res.json({ versionActual: '2.1.0', changelog });
+  res.json({ versionActual: '2.2.0', changelog });
 });
 
 app.put('/api/empresa', upload.single('logo'), (req, res) => {
   try {
+    if (req.file) optimizeInBackground(req.file);
     const { nombre_empresa, telefono, color_marca } = req.body;
     const actual = db.prepare('SELECT * FROM empresa WHERE id = 1').get();
     const logo_path = req.file ? `/uploads/${req.file.filename}` : actual.logo_path;
@@ -1259,6 +1272,8 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
       return res.status(400).json({ error: 'El rango de números es menor a la cantidad máxima de participantes' });
     }
 
+    if (req.files?.imagen_producto?.[0]) optimizeInBackground(req.files.imagen_producto[0]);
+    if (req.files?.banner_empresa?.[0]) optimizeInBackground(req.files.banner_empresa[0]);
     const imagen_producto = req.files?.imagen_producto?.[0] ? `/uploads/${req.files.imagen_producto[0].filename}` : null;
     const banner_empresa = req.files?.banner_empresa?.[0] ? `/uploads/${req.files.banner_empresa[0].filename}` : null;
 
@@ -1370,6 +1385,8 @@ app.get('/api/rifas/:id/dashboard', (req, res) => {
 app.put('/api/rifas/:id', upload.fields([{ name: 'imagen_producto' }, { name: 'banner_empresa' }]), (req, res) => {
   const rifa = getRifa(req.params.id);
   if (!rifa) return res.status(404).json({ error: 'Rifa no encontrada' });
+  if (req.files?.imagen_producto?.[0]) optimizeInBackground(req.files.imagen_producto[0]);
+  if (req.files?.banner_empresa?.[0]) optimizeInBackground(req.files.banner_empresa[0]);
   const b = req.body;
   const imagen_producto = req.files?.imagen_producto?.[0] ? `/uploads/${req.files.imagen_producto[0].filename}` : rifa.imagen_producto;
   const banner_empresa = req.files?.banner_empresa?.[0] ? `/uploads/${req.files.banner_empresa[0].filename}` : rifa.banner_empresa;
