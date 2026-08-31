@@ -1,4 +1,4 @@
-# RifasPRO 🎟️
+# Rifas SYC 🎲
 
 Sistema de rifas colombiano autónomo (offline-first): gestión de rifas, venta de
 boletas, generador de posters con QR, balotera virtual animada y envío masivo de

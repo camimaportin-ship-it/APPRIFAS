@@ -832,6 +832,12 @@ table.tbl th{white-space:nowrap;}
   .grupo-celda{min-width:44px;}
 }
 
+/* Fase 1.5 — Accesibilidad */
+.skip-link{position:absolute; left:-9999px; top:auto; width:1px; height:1px; overflow:hidden; background:var(--navy-950); color:#fff; padding:10px 14px; border-radius:8px; z-index:10000; text-decoration:none; font-weight:700;}
+.skip-link:focus{left:12px; top:12px; width:auto; height:auto;}
+.nav-sec{font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,255,255,.55);} /* contraste mejorado 0.35→0.55 Fase 1.5 */
+#login-screen label{color:rgba(255,255,255,0.85) !important;} /* contraste AA Fase 1.5 */
+
 /* ---- Sidebar footer: responsive ---- */
 @media(max-width:860px){
   .sidebar__footer{padding:14px 16px; font-size:10px;}

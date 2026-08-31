@@ -139,6 +139,10 @@ async function initDB() {
     rawDb = new SQL.Database();
   }
   const db = new SqlJsWrapper(rawDb);
+  // Fase 2.1 — PRAGMAs de integridad/performance (best-effort en sql.js)
+  try { db.exec('PRAGMA foreign_keys = ON'); } catch (e) {}
+  try { db.exec('PRAGMA journal_mode = WAL'); } catch (e) {}
+  try { db.exec('PRAGMA synchronous = NORMAL'); } catch (e) {}
   return db;
 }
 
@@ -423,6 +427,53 @@ CREATE TABLE IF NOT EXISTS notificaciones (
 );
 CREATE INDEX IF NOT EXISTS idx_notif_tipo ON notificaciones(tipo);
 CREATE INDEX IF NOT EXISTS idx_notif_rifa ON notificaciones(rifa_id);
+
+-- Fase 1.2: Sesiones persistentes (reemplaza Map en memoria)
+CREATE TABLE IF NOT EXISTS sesiones (
+  token TEXT PRIMARY KEY,
+  usuario TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  rol TEXT NOT NULL,
+  exp INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_sesiones_exp ON sesiones(exp);
+CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones(usuario);
+
+-- Fase 1.2: CAPTCHA server-side (TTL 2 min)
+CREATE TABLE IF NOT EXISTS captcha_tokens (
+  id TEXT PRIMARY KEY,
+  respuesta INTEGER NOT NULL,
+  exp INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_captcha_exp ON captcha_tokens(exp);
+
+-- Fase 3.1 — Pagos (Wompi stub)
+CREATE TABLE IF NOT EXISTS pagos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rifa_id INTEGER NOT NULL,
+  participante_id INTEGER NOT NULL,
+  monto INTEGER NOT NULL,
+  metodo TEXT DEFAULT 'wompi',
+  estado TEXT DEFAULT 'pendiente' CHECK (estado IN ('pendiente','aprobado','rechazado')),
+  referencia TEXT UNIQUE,
+  wompi_id TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pagos_rifa ON pagos(rifa_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_participante ON pagos(participante_id);
+
+-- Fase 3.3 — Referidos
+CREATE TABLE IF NOT EXISTS referidos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  codigo TEXT UNIQUE NOT NULL,
+  rifa_id INTEGER,
+  referido_por INTEGER,
+  usos INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_referidos_codigo ON referidos(codigo);
 `);
 }
 

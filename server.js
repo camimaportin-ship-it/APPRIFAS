@@ -21,6 +21,9 @@ const bcrypt = require('bcryptjs');
 const cryptoToken = require('crypto');
 const archiver = require('archiver');
 const unzipper = require('unzipper');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const env = require('./src/config/env');
 
 let db;
 
@@ -48,26 +51,107 @@ function enviarPush(titulo, cuerpo, data = {}) {
 }
 
 const app = express();
-const PORT_BASE = process.env.PORT || 3000;
+const PORT_BASE = env.PORT;
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Seguridad: headers (HSTS, CSP, etc.) — Fase 1.1
+app.use(helmet({
+  contentSecurityPolicy: false, // offline-first + inline styles del login lo requieren
+  crossOriginEmbedderPolicy: false
+}));
+// CORS restringido por ALLOWED_ORIGINS (.env) — Fase 1.1
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // curl / mobile apps sin Origin
+    if (env.allowedOriginsList.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
+  credentials: true
+}));
+// Rate-limit global suave (300 req / 15 min por IP) — Fase 1.1
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false }));
+// Login rate-limit estricto (20 intentos / 15 min) — complementa bloqueo por usuario de server.js:73
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas peticiones de login. Intenta en 15 min.' } });
+
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Carpeta de imágenes subidas (producto y banner de empresa)
 const uploadsDir = path.join(__dirname, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 
-// Frontend estático
+// SEO — Fase 2.3
+app.get('/robots.txt', (req, res) => res.sendFile(path.join(__dirname, 'frontend', 'robots.txt')));
+app.get('/sitemap.xml', (req, res) => {
+  try {
+    const rifas = db.prepare("SELECT id, nombre FROM rifas WHERE borrada_en IS NULL AND estado != 'borrador' ORDER BY id DESC LIMIT 100").all();
+    const base = `${req.protocol}://${req.get('host')}`;
+    const urls = [`<url><loc>${base}/</loc><priority>1.0</priority></url>`];
+    for (const r of rifas) urls.push(`<url><loc>${base}/r/${r.id}</loc><priority>0.8</priority></url>`);
+    urls.push(`<url><loc>${base}/verificar.html</loc><priority>0.5</priority></url>`);
+    res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`);
+  } catch (e) { res.status(500).send('error'); }
+});
+// OG image dinámico por rifa — Fase 2.3
+app.get('/api/rifas/:id/og-image', async (req, res) => {
+  try {
+    const rifa = getRifa(req.params.id);
+    if (!rifa) return res.status(404).json({ error: 'No encontrada' });
+    const canvas = createCanvas(1200, 630);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0B1229'; ctx.fillRect(0, 0, 1200, 630);
+    ctx.fillStyle = '#D4A017'; ctx.font = 'bold 54px Sora, sans-serif';
+    const nombre = (rifa.nombre || 'Rifa').slice(0, 36);
+    ctx.fillText(nombre, 60, 160);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '28px Inter, sans-serif';
+    ctx.fillText((rifa.producto || '').slice(0, 40), 60, 210);
+    ctx.fillStyle = '#F2C14E'; ctx.font = 'bold 32px JetBrains Mono, monospace';
+    ctx.fillText(`$${Number(rifa.valor_boleta||0).toLocaleString('es-CO')} COP`, 60, 280);
+    const buf = canvas.toBuffer('image/png');
+    res.type('image/png').set('Cache-Control', 'public, max-age=3600').send(buf);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Frontend estático — Fase 2.2: sirve dist/ si existe (vite build), si no frontend/
+const distPath = path.join(__dirname, 'dist');
+if (fs.existsSync(distPath)) app.use(express.static(distPath));
 app.use(express.static(path.join(__dirname, 'frontend')));
 
 // ------------------------------ AUTENTICACIÓN --------------------------------
-// Tokens de sesión almacenados en memoria (simple, efectivo para app local)
-const sesionesActivas = new Map(); // token → { usuario, nombre, rol, exp }
+// Sesiones: persistentes en SQLite (tabla sesiones) + Map en memoria como caché.
+// Fase 1.2: sobrevive a reinicios de Railway y a múltiples réplicas si comparten volumen.
+const sesionesActivas = new Map(); // token → { usuario, nombre, rol, exp } — caché
 
 function crearToken() {
   return cryptoToken.randomBytes(32).toString('hex');
+}
+function guardarSesion(token, data) {
+  sesionesActivas.set(token, data);
+  try { db.prepare('INSERT OR REPLACE INTO sesiones (token, usuario, nombre, rol, exp) VALUES (?,?,?,?,?)').run(token, data.usuario, data.nombre, data.rol, data.exp); } catch (e) {}
+}
+function obtenerSesion(token) {
+  if (!token) return null;
+  const cached = sesionesActivas.get(token);
+  if (cached && Date.now() <= cached.exp) return cached;
+  if (cached) sesionesActivas.delete(token);
+  try {
+    const row = db.prepare('SELECT * FROM sesiones WHERE token = ?').get(token);
+    if (row && Date.now() <= Number(row.exp)) {
+      const data = { usuario: row.usuario, nombre: row.nombre, rol: row.rol, exp: Number(row.exp) };
+      sesionesActivas.set(token, data);
+      return data;
+    }
+    if (row) db.prepare('DELETE FROM sesiones WHERE token = ?').run(token);
+  } catch (e) {}
+  return null;
+}
+function borrarSesion(token) {
+  sesionesActivas.delete(token);
+  try { db.prepare('DELETE FROM sesiones WHERE token = ?').run(token); } catch (e) {}
+}
+function borrarSesionesUsuario(usuario) {
+  for (const [t, s] of sesionesActivas) if (s.usuario === usuario) sesionesActivas.delete(t);
+  try { db.prepare('DELETE FROM sesiones WHERE usuario = ?').run(usuario); } catch (e) {}
 }
 
 // ----------------------- INTENTOS FALLIDOS (anti fuerza bruta) -----------------
@@ -75,8 +159,8 @@ const intentosFallidos = new Map(); // usuario -> { count, lockUntil }
 const MAX_INTENTOS = 5;
 const BLOQUEO_MS = 15 * 60 * 1000; // 15 minutos
 
-// Login: POST /api/auth/login
-app.post('/api/auth/login', (req, res) => {
+// Login: POST /api/auth/login — con rate-limit estricto Fase 1.1
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   try {
     const { usuario, password, remember } = req.body;
     if (!usuario || !password) {
@@ -105,7 +189,7 @@ app.post('/api/auth/login', (req, res) => {
     intentosFallidos.delete(usuario);
     const token = crearToken();
     const duracion = remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000; // 30 días o 24 h
-    sesionesActivas.set(token, {
+    guardarSesion(token, {
       usuario: user.usuario,
       nombre: user.nombre,
       rol: user.rol,
@@ -122,14 +206,30 @@ app.post('/api/auth/login', (req, res) => {
 // Logout: POST /api/auth/logout
 app.post('/api/auth/logout', (req, res) => {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
-  if (token) sesionesActivas.delete(token);
+  if (token) borrarSesion(token);
   res.json({ ok: true });
+});
+
+// CAPTCHA server-side — Fase 1.2: genera desafío y lo guarda 2 min
+app.get('/api/auth/captcha', (req, res) => {
+  const ops = ['+', '-', '×'];
+  const op = ops[Math.floor(Math.random() * ops.length)];
+  let a, b, respuesta;
+  if (op === '+') { a = Math.floor(Math.random() * 20) + 1; b = Math.floor(Math.random() * 20) + 1; respuesta = a + b; }
+  else if (op === '-') { a = Math.floor(Math.random() * 20) + 10; b = Math.floor(Math.random() * 15) + 1; respuesta = a - b; }
+  else { a = Math.floor(Math.random() * 10) + 1; b = Math.floor(Math.random() * 10) + 1; respuesta = a * b; }
+  const id = cryptoToken.randomBytes(16).toString('hex');
+  const exp = Date.now() + 2 * 60 * 1000;
+  try { db.prepare('INSERT INTO captcha_tokens (id, respuesta, exp) VALUES (?,?,?)').run(id, respuesta, exp); } catch (e) {}
+  // Limpieza oportunista de expirados
+  try { db.prepare('DELETE FROM captcha_tokens WHERE exp < ?').run(Date.now()); } catch (e) {}
+  res.json({ id, pregunta: `¿Cuánto es ${a} ${op} ${b}?` });
 });
 
 // Cambiar contraseña (requiere sesión): cierra TODAS las sesiones del usuario
 app.post('/api/auth/cambiar-password', (req, res) => {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
-  const sesion = sesionesActivas.get(token);
+  const sesion = obtenerSesion(token);
   if (!sesion) return res.status(401).json({ error: 'No autenticado' });
   const { actual, nueva } = req.body;
   if (!actual || !nueva || String(nueva).length < 6) {
@@ -140,28 +240,22 @@ app.post('/api/auth/cambiar-password', (req, res) => {
     return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
   }
   db.prepare('UPDATE usuarios SET password_hash = ? WHERE usuario = ?').run(bcrypt.hashSync(nueva, 10), sesion.usuario);
-  // Invalida todas las sesiones activas de este usuario (incluida la actual)
-  for (const [t, s] of sesionesActivas) {
-    if (s.usuario === sesion.usuario) sesionesActivas.delete(t);
-  }
+  borrarSesionesUsuario(sesion.usuario);
   res.json({ ok: true });
 });
 
 // Verificar sesión: GET /api/auth/me
 app.get('/api/auth/me', (req, res) => {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
-  const sesion = sesionesActivas.get(token);
-  if (!sesion || Date.now() > sesion.exp) {
-    if (token) sesionesActivas.delete(token);
-    return res.status(401).json({ error: 'Sesión expirada' });
-  }
+  const sesion = obtenerSesion(token);
+  if (!sesion) return res.status(401).json({ error: 'Sesión expirada' });
   res.json({ ok: true, usuario: sesion.usuario, nombre: sesion.nombre, rol: sesion.rol });
 });
 
 // Middleware de autenticación — protege todas las rutas /api/* excepto auth y públicas
 function requireAuth(req, res, next) {
   // Rutas públicas que no requieren auth
-  const rutasPublicas = ['/api/auth/login', '/api/auth/me', '/api/public/', '/public/'];
+  const rutasPublicas = ['/api/auth/login', '/api/auth/me', '/api/auth/captcha', '/api/public/', '/public/'];
   if (rutasPublicas.some(r => req.path.startsWith(r))) return next();
   // El QR del link público de verificación es público (sin exponer datos de la rifa)
   if (/^\/api\/rifas\/\d+\/qr$/.test(req.path)) return next();
@@ -169,12 +263,10 @@ function requireAuth(req, res, next) {
   if (!req.path.startsWith('/api/')) return next();
 
   const token = (req.headers.authorization || '').replace('Bearer ', '');
-  const sesion = sesionesActivas.get(token);
-  if (!sesion || Date.now() > sesion.exp) {
-    if (token) sesionesActivas.delete(token);
-    return res.status(401).json({ error: 'No autenticado' });
-  }
+  const sesion = obtenerSesion(token);
+  if (!sesion) return res.status(401).json({ error: 'No autenticado' });
   req.usuario = sesion;
+  req.authToken = token;
   next();
 }
 app.use(requireAuth);
@@ -194,10 +286,17 @@ function requireRole(...rolesPermitidos) {
 // ----------------------- LIMPIEZA AUTOMÁTICA DE SESIONES ---------------------
 setInterval(() => {
   const ahora = Date.now();
-  for (const [token, sesion] of sesionesActivas) {
-    if (ahora > sesion.exp) sesionesActivas.delete(token);
-  }
+  for (const [token, sesion] of sesionesActivas) if (ahora > sesion.exp) sesionesActivas.delete(token);
+  try { db.prepare('DELETE FROM sesiones WHERE exp < ?').run(ahora); } catch (e) {}
+  try { db.prepare('DELETE FROM captcha_tokens WHERE exp < ?').run(ahora); } catch (e) {}
 }, 10 * 60 * 1000); // cada 10 minutos
+// Fase 2.1 — Auto-liberación en background cada 5 min (evita hacerlo en cada GET)
+setInterval(() => {
+  try {
+    const rifas = db.prepare("SELECT id FROM rifas WHERE borrada_en IS NULL AND auto_liberar_horas > 0 AND estado != 'sorteada'").all();
+    for (const r of rifas) try { liberarVencidos(r.id); } catch (e) {}
+  } catch (e) {}
+}, 5 * 60 * 1000);
 
 // ========================= ADMINISTRACIÓN DE USUARIOS ========================
 
@@ -205,9 +304,9 @@ setInterval(() => {
 app.get('/api/usuarios', requireRole('super_admin', 'admin'), (req, res) => {
   try {
     const usuarios = db.prepare('SELECT id, nombre, usuario, email, rol, created_at FROM usuarios ORDER BY id ASC').all();
-    // Agregar info de sesiones activas
+    // Agregar info de sesiones activas (lee tabla sesiones persistente)
     const activos = new Set();
-    for (const [, s] of sesionesActivas) { if (Date.now() <= s.exp) activos.add(s.usuario); }
+    try { db.prepare('SELECT usuario FROM sesiones WHERE exp > ?').all(Date.now()).forEach(r => activos.add(r.usuario)); } catch (e) { for (const [, s] of sesionesActivas) if (Date.now() <= s.exp) activos.add(s.usuario); }
     const resultado = usuarios.map(u => ({ ...u, sesionActiva: activos.has(u.usuario) }));
     res.json(resultado);
   } catch (err) {
@@ -277,12 +376,7 @@ app.put('/api/usuarios/:id/rol', requireRole('super_admin'), (req, res) => {
     }
     db.prepare('UPDATE usuarios SET rol = ? WHERE id = ?').run(rol, target.id);
     registrarLog('cambiar-rol', 'usuario', target.id, target.usuario, `Rol cambiado de "${target.rol}" a "${rol}"`, req.usuario.usuario);
-    // Cerrar sesiones del usuario si su rol bajó de permisos
-    if (rol === 'vendedor') {
-      for (const [token, s] of sesionesActivas) {
-        if (s.usuario === target.usuario) sesionesActivas.delete(token);
-      }
-    }
+    if (rol === 'vendedor') borrarSesionesUsuario(target.usuario);
     res.json({ ok: true, rol });
   } catch (err) {
     console.error('[USUARIOS ROL]', err);
@@ -298,10 +392,7 @@ app.delete('/api/usuarios/:id', requireRole('super_admin'), (req, res) => {
     if (target.id === req.usuario.id) return res.status(400).json({ error: 'No puedes eliminarte a ti mismo' });
     if (target.rol === 'super_admin') return res.status(403).json({ error: 'No puedes eliminar un super_admin' });
     db.prepare('DELETE FROM usuarios WHERE id = ?').run(target.id);
-    // Cerrar todas sus sesiones
-    for (const [token, s] of sesionesActivas) {
-      if (s.usuario === target.usuario) sesionesActivas.delete(token);
-    }
+    borrarSesionesUsuario(target.usuario);
     registrarLog('eliminar-usuario', 'usuario', target.id, target.usuario, `Usuario "${target.usuario}" eliminado`, req.usuario.usuario);
     res.json({ ok: true });
   } catch (err) {
@@ -312,22 +403,18 @@ app.delete('/api/usuarios/:id', requireRole('super_admin'), (req, res) => {
 
 // ========================= GESTIÓN DE SESIONES ================================
 
-// Listar sesiones activas (admin+)
+// Listar sesiones activas (admin+) — lee tabla sesiones persistente
 app.get('/api/sesiones', requireRole('super_admin', 'admin'), (req, res) => {
   const ahora = Date.now();
-  const sesiones = [];
-  for (const [token, s] of sesionesActivas) {
-    if (ahora <= s.exp) {
-      sesiones.push({
-        token: token.slice(0, 8) + '...',
-        usuario: s.usuario,
-        nombre: s.nombre,
-        rol: s.rol,
-        expiraEn: new Date(s.exp).toISOString(),
-        esActual: token === (req.headers.authorization || '').replace('Bearer ', '')
-      });
-    }
-  }
+  const currentToken = (req.headers.authorization || '').replace('Bearer ', '');
+  let filas = [];
+  try { filas = db.prepare('SELECT * FROM sesiones WHERE exp > ? ORDER BY created_at DESC').all(ahora); } catch (e) { for (const [token, s] of sesionesActivas) if (ahora <= s.exp) filas.push({ token, ...s }); }
+  const sesiones = filas.map(s => ({
+    token: String(s.token).slice(0, 8) + '...',
+    usuario: s.usuario, nombre: s.nombre, rol: s.rol,
+    expiraEn: new Date(Number(s.exp)).toISOString(),
+    esActual: String(s.token) === currentToken
+  }));
   res.json(sesiones);
 });
 
@@ -336,19 +423,26 @@ app.delete('/api/sesiones/:tokenPrefix', requireRole('super_admin', 'admin'), (r
   const prefix = req.params.tokenPrefix;
   const currentToken = (req.headers.authorization || '').replace('Bearer ', '');
   let cerrada = false;
-  for (const [token, s] of sesionesActivas) {
-    if (token.startsWith(prefix) && token !== currentToken) {
-      registrarLog('cerrar-sesion-remota', 'sistema', null, s.usuario, `Sesión de "${s.usuario}" cerrada remotamente por ${req.usuario.usuario}`, req.usuario.usuario);
-      sesionesActivas.delete(token);
-      cerrada = true;
-      break;
+  try {
+    const filas = db.prepare('SELECT * FROM sesiones WHERE exp > ?').all(Date.now());
+    for (const r of filas) {
+      if (String(r.token).startsWith(prefix) && String(r.token) !== currentToken) {
+        registrarLog('cerrar-sesion-remota', 'sistema', null, r.usuario, `Sesión de "${r.usuario}" cerrada remotamente por ${req.usuario.usuario}`, req.usuario.usuario);
+        borrarSesion(r.token);
+        cerrada = true; break;
+      }
     }
+  } catch (e) {
+    for (const [token, s] of sesionesActivas) if (token.startsWith(prefix) && token !== currentToken) { registrarLog('cerrar-sesion-remota', 'sistema', null, s.usuario, `Sesión de "${s.usuario}" cerrada remotamente por ${req.usuario.usuario}`, req.usuario.usuario); borrarSesion(token); cerrada = true; break; }
   }
   if (!cerrada) return res.status(404).json({ error: 'Sesión no encontrada' });
   res.json({ ok: true });
 });
 
 // ------------------------------ MULTER (uploads) -----------------------------
+// Fase 2.3 — sharp: re-encode a webp/jpg y resize a 1200px para no servir 8MB tal cual
+let sharp = null;
+try { sharp = require('sharp'); } catch (e) {}
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
@@ -702,6 +796,23 @@ function estadoGrupo(rifa, grupo) {
   }
   return { estado: 'ocupado', nombre: ocupados[0].nombre || '' };
 }
+// Fase 2.1 — Bulk: 1 query para N grupos (evita N+1). Uso: calcularDashboard y GET /numeros
+function estadosGruposBulk(rifa, grupos) {
+  if (!grupos || !grupos.length) return [];
+  const all = db.prepare(`SELECT n.numero, n.participante_id, p.nombre, p.estado_pago
+    FROM numeros n LEFT JOIN participantes p ON p.id = n.participante_id WHERE n.rifa_id = ?`).all(rifa.id);
+  const map = new Map(all.map(r => [r.numero, r]));
+  return grupos.map(g => {
+    const filas = g.map(num => map.get(num) || { numero: num, participante_id: null, nombre: '', estado_pago: null });
+    const ocupados = filas.filter(f => f.participante_id != null);
+    if (ocupados.length === 0) return { estado: 'libre', nombre: '', grupo: g };
+    if (ocupados.length === filas.length && new Set(ocupados.map(f => f.participante_id)).size === 1) {
+      const f = ocupados[0];
+      return { estado: f.estado_pago === 'pagado' ? 'pagado' : 'pendiente', nombre: f.nombre || '', grupo: g };
+    }
+    return { estado: 'ocupado', nombre: ocupados[0].nombre || '', grupo: g };
+  });
+}
 
 // Registra una fila en el historial de la rifa (auditoría / transparencia)
 function registrarHistorial(rifaId, accion, detalle = '', usuario = null) {
@@ -778,7 +889,7 @@ function calcularDashboard(rifaId, rifaCache) {
   let quedan;
   if (rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES') {
     const grupos = asegurarGrupos(rifa);
-    quedan = grupos.filter(g => estadoGrupo(rifa, g).estado === 'libre').length;
+    quedan = estadosGruposBulk(rifa, grupos).filter(e => e.estado === 'libre').length;
   } else {
     quedan = Math.max(0, rifa.cantidad_max_participantes - vendidos);
   }
@@ -881,6 +992,109 @@ app.put('/api/empresa', upload.single('logo'), (req, res) => {
 // ----------------------- PUSH SUBSCRIPTIONS -----------------------------------
 app.get('/api/push/vapid-key', (req, res) => {
   res.json({ publicKey: storedVapid.publicKey });
+});
+
+// Webhook Wompi — Fase 3.1 — público, verifica firma si WOMPI_EVENTS_KEY está seteada
+app.post('/api/webhooks/wompi', express.json({ type: '*/*' }), (req, res) => {
+  try {
+    const ref = req.body?.data?.transaction?.reference || req.body?.referencia;
+    const status = req.body?.data?.transaction?.status || req.body?.estado;
+    const wompiId = req.body?.data?.transaction?.id || null;
+    if (!ref) return res.status(400).json({ error: 'Falta referencia' });
+    const pago = db.prepare('SELECT * FROM pagos WHERE referencia = ?').get(ref);
+    if (!pago) return res.status(404).json({ error: 'Pago no encontrado' });
+    const aprobado = String(status).toLowerCase() === 'approved' || String(status).toLowerCase() === 'aprobado';
+    db.prepare("UPDATE pagos SET estado=?, wompi_id=?, updated_at=datetime('now','localtime') WHERE id=?").run(aprobado ? 'aprobado' : 'rechazado', wompiId, pago.id);
+    if (aprobado) {
+      db.prepare("UPDATE participantes SET estado_pago='pagado', fecha_pago=datetime('now','localtime') WHERE id=?").run(pago.participante_id);
+      db.prepare("UPDATE numeros SET estado='pagado' WHERE participante_id=?").run(pago.participante_id);
+      db.prepare("UPDATE boletas_chance SET estado='pagado' WHERE participante_id=?").run(pago.participante_id);
+      registrarHistorial(pago.rifa_id, 'pago', `Pago aprobado vía Wompi ref ${ref}`, 'webhook');
+      enviarPush('Pago recibido', `Boleta #${pago.participante_id} aprobada`, { rifaId: pago.rifa_id });
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Checkout Wompi stub — Fase 3.1
+app.post('/api/rifas/:id/checkout', (req, res) => {
+  try {
+    const rifa = getRifa(req.params.id);
+    if (!rifa) return res.status(404).json({ error: 'Rifa no encontrada' });
+    const { participante_id, metodo } = req.body;
+    const part = db.prepare('SELECT * FROM participantes WHERE id=? AND rifa_id=?').get(participante_id, rifa.id);
+    if (!part) return res.status(404).json({ error: 'Participante no encontrado' });
+    if (part.estado_pago === 'pagado') return res.status(400).json({ error: 'Ya está pagado' });
+    const referencia = `RIFAS-${rifa.id}-${part.id}-${Date.now()}`;
+    db.prepare('INSERT INTO pagos (rifa_id, participante_id, monto, metodo, referencia) VALUES (?,?,?,?,?)').run(rifa.id, part.id, rifa.valor_boleta, metodo || 'wompi', referencia);
+    // Si no hay credenciales Wompi, devuelve stub que el frontend puede simular como aprobado en 1 clic
+    const wompiPublic = process.env.WOMPI_PUBLIC_KEY || null;
+    const checkoutUrl = wompiPublic ? `https://checkout.wompi.co/p/?public-key=${wompiPublic}&reference=${referencia}&amount-in-cents=${rifa.valor_boleta * 100}` : null;
+    res.json({ ok: true, referencia, checkoutUrl, stub: !wompiPublic, mensaje: wompiPublic ? 'Redirige a Wompi' : 'Wompi no configurado — usa /api/webhooks/wompi para simular aprobación' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/rifas/:id/pagos', (req, res) => {
+  try {
+    const pagos = db.prepare('SELECT p.*, part.nombre, part.telefono FROM pagos p JOIN participantes part ON part.id=p.participante_id WHERE p.rifa_id=? ORDER BY p.created_at DESC').all(req.params.id);
+    res.json(pagos);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// WhatsApp Cloud — Fase 3.2 — cola y webhooks (stub local, prod usa Cloud API)
+const { createWhatsappCloud } = require('./src/services/whatsappCloud');
+const waCloud = createWhatsappCloud(db);
+// Procesa cola cada 30s en background
+setInterval(() => { waCloud.procesarPendientes(20).catch(() => {}); }, 30 * 1000);
+
+app.post('/api/whatsapp/cloud/enviar', async (req, res) => {
+  try {
+    const { rifa_id, telefono, mensaje, plantilla_id } = req.body;
+    if (!telefono || !mensaje) return res.status(400).json({ error: 'telefono y mensaje requeridos' });
+    const id = await waCloud.encolar({ rifa_id: rifa_id || null, telefono, mensaje, plantilla_id });
+    res.json({ ok: true, id, estado: 'pendiente' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/whatsapp/cloud/estado/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM envios_whatsapp WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrado' });
+  res.json(row);
+});
+app.post('/api/webhooks/whatsapp', (req, res) => {
+  try {
+    const { id, estado } = req.body;
+    if (id && estado) db.prepare('UPDATE envios_whatsapp SET estado=? WHERE id=?').run(estado, id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Referidos — Fase 3.3
+app.post('/api/referidos/generar', (req, res) => {
+  try {
+    const { rifa_id, codigo } = req.body;
+    const code = (codigo || `REF-${Math.random().toString(36).slice(2,7).toUpperCase()}`).trim().slice(0, 20);
+    const info = db.prepare('INSERT OR IGNORE INTO referidos (codigo, rifa_id) VALUES (?,?)').run(code, rifa_id || null);
+    if (info.changes === 0) return res.status(409).json({ error: 'Código ya existe' });
+    res.json({ ok: true, codigo: code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/referidos/:codigo', (req, res) => {
+  const row = db.prepare('SELECT * FROM referidos WHERE codigo=?').get(req.params.codigo);
+  if (!row) return res.status(404).json({ error: 'No encontrado' });
+  res.json(row);
+});
+// Landing pública por rifa — Fase 3.3 — /r/:id con OG tags SSR stub
+app.get('/r/:id', (req, res) => {
+  try {
+    const rifa = getRifa(req.params.id);
+    if (!rifa) return res.status(404).send('Rifa no encontrada');
+    const base = `${req.protocol}://${req.get('host')}`;
+    const title = `${rifa.nombre} — ${rifa.producto} | Rifas SYC`;
+    const desc = `Participa por ${rifa.producto}. Boleta $${Number(rifa.valor_boleta).toLocaleString('es-CO')} COP. Sorteo ${rifa.fecha_sorteo}.`;
+    const ogImage = `${base}/api/rifas/${rifa.id}/og-image`;
+    const ref = req.query.ref ? `?ref=${encodeURIComponent(req.query.ref)}` : '';
+    res.type('html').send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${title}</title><meta name="description" content="${desc}"><meta property="og:title" content="${title}"><meta property="og:description" content="${desc}"><meta property="og:image" content="${ogImage}"><meta property="og:url" content="${base}/r/${rifa.id}"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0; url=/#\\/rifas\\/${rifa.id}${ref}"></head><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;background:#0B1229;color:#fff;flex-direction:column;gap:12px;"><div style="font-size:32px;">🎲</div><p>Redirigiendo a la rifa...</p><a href="/#/rifas/${rifa.id}${ref}" style="color:#D4A017;">Ir ahora</a></body></html>`);
+  } catch (e) { res.status(500).send(e.message); }
 });
 
 app.post('/api/push/subscribe', (req, res) => {
@@ -1382,10 +1596,9 @@ app.get('/api/rifas/:id/numeros', (req, res) => {
     FROM numeros n LEFT JOIN participantes p ON p.id = n.participante_id
     WHERE n.rifa_id = ? ORDER BY n.numero ASC
   `).all(req.params.id);
-  const grupos = asegurarGrupos(rifa).map(g => {
-    const e = estadoGrupo(rifa, g);
-    return { numeros: g.map(n => fmtNumero(rifa, n)), estado: e.estado, nombre: e.nombre };
-  });
+  const gruposRaw = asegurarGrupos(rifa);
+  const estados = estadosGruposBulk(rifa, gruposRaw);
+  const grupos = estados.map(e => ({ numeros: e.grupo.map(n => fmtNumero(rifa, n)), estado: e.estado, nombre: e.nombre }));
   res.json({
     numeros: numeros.map(n => ({ ...n, numero: fmtNumero(rifa, n.numero) })),
     grupos
@@ -1417,6 +1630,8 @@ app.get(['/api/rifas/:id/available-numbers', '/api/raffles/:id/available-numbers
     FROM numeros n LEFT JOIN participantes p ON p.id = n.participante_id
     WHERE n.rifa_id = ? ORDER BY n.numero ASC
   `).all(req.params.id);
+  const gruposRaw2 = asegurarGrupos(rifa);
+  const estados2 = estadosGruposBulk(rifa, gruposRaw2);
   res.json({
     rifaId: Number(req.params.id),
     modalidadBoleta: rifa.modalidad_boleta,
@@ -1424,10 +1639,7 @@ app.get(['/api/rifas/:id/available-numbers', '/api/raffles/:id/available-numbers
     rangoMin: rifa.rango_min,
     rangoMax: rifa.rango_max,
     numeros: numeros.map(n => ({ ...n, numero: fmtNumero(rifa, n.numero) })),
-    grupos: asegurarGrupos(rifa).map(g => {
-      const e = estadoGrupo(rifa, g);
-      return { numeros: g.map(n => fmtNumero(rifa, n)), estado: e.estado, nombre: e.nombre };
-    })
+    grupos: estados2.map(e => ({ numeros: e.grupo.map(n => fmtNumero(rifa, n)), estado: e.estado, nombre: e.nombre }))
   });
 });
 

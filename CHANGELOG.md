@@ -55,6 +55,50 @@ Historial de versiones del aplicativo.
 
 ---
 
+## v2.2.0 — 31 de agosto de 2026 — Profesionalización + Escalabilidad + Ventaja competitiva
+
+### Fase 0 — Higiene
+- `README.md` unificado a "Rifas SYC" + `package.json` postinstall corregido
+- `.gitignore` añade `.env` y `AUDIT.md` · `.env.example` + `CONTRIBUTING.md`
+- `AUDIT.md` auditoría completa con roadmap por fases
+
+### Fase 1 — Profesionalización (P0)
+- **Seguridad:** `helmet`, `CORS` restringido por `ALLOWED_ORIGINS`, `rate-limit` global 300/15m + `loginLimiter` 20/15m, `express.json` 10mb→1mb, `dotenv` + `src/config/env.js` (zod fail-fast)
+- **Sesiones persistentes:** tablas `sesiones` + `captcha_tokens` (`backend/db.js`), helpers `guardarSesion/obtenerSesion/borrarSesion` (dual-write Map+SQLite), `GET /api/auth/captcha` TTL 2m, todos los endpoints de sesión leen tabla
+- **Modularización mínima:** `src/middleware/auth.js`, `src/middleware/validate.js`, `src/utils/sanitize.js`, `src/services/grupos.js`, `src/validators/rifas.js`
+- **Tests:** `vitest` + `supertest` + `tests/smoke.test.js` (5 tests), `vitest.config.js`, scripts `test/build/lint/format`
+- **Accesibilidad:** skip-link, `label for`, `aria-*`, `aria-current`, `h2.nav-sec`, contraste 0.55, persistencia sidebar `localStorage`
+
+### Fase 2 — Escalabilidad (P1)
+- **BD:** `PRAGMA foreign_keys/WAL`, `migrations/001_baseline.sql`, `estadosGruposBulk()` 1 query (fix N+1), `liberarVencidos` cada 5m en background
+- **Frontend modular:** `vite.config.js` + `frontend/src/api.js` + `.eslintrc` + `.prettierrc`, `server.js` sirve `dist/` si existe
+- **PWA/Performance:** `sharp` lazy, `GET /robots.txt` + `/sitemap.xml` + `/api/rifas/:id/og-image`, SW `v8` + `app.js?v=4` + banner `controllerchange`
+
+### Fase 3 — Ventaja competitiva (P2)
+- **Cobro:** tabla `pagos` + `POST /api/rifas/:id/checkout` (Wompi stub o URL real) + `POST /api/webhooks/wompi` + `GET /pagos`
+- **WhatsApp Cloud:** `src/services/whatsappCloud.js` cola en `envios_whatsapp` (cada 30s) + `POST /api/whatsapp/cloud/enviar` + `GET /estado/:id` + `POST /api/webhooks/whatsapp`
+- **Adquisición:** `POST /api/referidos/generar` + `GET /api/referidos/:codigo` + `GET /r/:id` landing con OG tags + footer global + links robots/sitemap/Coljuegos
+
+---
+
+## v2.1.1 — 30 de agosto de 2026
+
+### Backend
+- `PUT /api/rifas/:id` ahora guarda `n_oportunidades` y regenera grupos (`asegurarGrupos`) cuando cambia el tamaño; añade `asegurarNumeros()` para sincronizar `numeros` con el rango; regenera `boletas_chance` al cambiar `simbolos`/`cifras`/modalidad y limpia datos huérfanos al cambiar modalidad (`grupos_numeros`, `boletas_chance`).
+- `POST /api/rifas/:id/participantes` acepta `estado_pago`, `metodo_pago`, `observacion` (pago en el registro).
+- `PUT /api/participantes/:id` — teléfono opcional, duplicados solo por cédula, guarda `metodo_pago`/`observacion`.
+- `POST /api/rifas/:id/participantes/masivo` acepta líneas con solo nombre.
+- `auto_liberar_horas` por defecto `0` (antes `24`) en `backend/db.js` y `server.js`.
+
+### Frontend
+- 3 vistas de números: cuadrícula / tabla / lista (`localStorage rifas-numeros-vista`).
+- Boletas disponibles clickeables en resumen (abren registro).
+- Formularios: teléfono opcional en todos los flujos, mapa CUATRO sin grilla 00-99 individual.
+- Service Worker `v7` (`/app.js` fuera de `APP_SHELL`) + `index.html` cache-bust `app.js?v=3`.
+- DB: migración `metodo_pago` y `observacion` en `participantes`.
+
+---
+
 ## v2.0.0 — Versión inicial
 
 - 6 modalidades de rifa: `BOLETAS_NORMAL`, `CUATRO_OPORTUNIDADES`, `CHANCE_CON_SIMBOLO`, `CHANCE_3_GANADORES`, `CHANCE_INDIVIDUAL`, `OPORTUNIDADES_4D`.

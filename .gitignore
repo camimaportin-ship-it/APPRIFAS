@@ -16,5 +16,11 @@ data/*.bak-*
 npm-debug.log*
 .DS_Store
 
+# Variables de entorno (nunca subir secretos)
+.env
+
+# Auditoría local (no subir hasta autorizar)
+AUDIT.md
+
 # Posters generados (se crean en runtime)
 uploads/poster-*.png

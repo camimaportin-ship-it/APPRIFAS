@@ -98,7 +98,7 @@ function mostrarLogin() {
   const preguntaEl = document.getElementById('login-captcha-pregunta');
   const respuestaEl = document.getElementById('login-captcha-respuesta');
   if (preguntaEl) preguntaEl.textContent = window._captchaActual.pregunta;
-  if (respuestaEl) respuestaEl.value = '';
+  if (respuestaEl) { respuestaEl.value = ''; respuestaEl.removeAttribute('aria-invalid'); }
 }
 
 function mostrarApp() {
@@ -137,6 +137,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     if (respuesta !== window._captchaActual.respuesta) {
       errDiv.textContent = '❌ Respuesta incorrecta. Intenta de nuevo.';
       errDiv.style.display = 'block';
+      captchaInput.setAttribute('aria-invalid', 'true');
       captchaInput.classList.add('shake');
       setTimeout(() => captchaInput.classList.remove('shake'), 400);
       window._captchaActual = generarCaptcha();
@@ -309,15 +310,18 @@ function esMobile() { return window.innerWidth <= 860; }
 function setSidebar(abrir) {
   const sb = document.getElementById('sidebar');
   const back = document.getElementById('sidebar-backdrop');
+  const btn = document.getElementById('btn-toggle-sidebar');
   if (esMobile()) {
-    // Móvil: off-canvas
     sb.classList.toggle('open', abrir);
     back.classList.toggle('visible', abrir);
   } else {
-    // Desktop: colapsar / expandir
     sb.classList.toggle('colapsado', !abrir);
+    try { localStorage.setItem('rifas-sidebar-colapsado', sb.classList.contains('colapsado') ? '1' : '0'); } catch (e) {}
   }
+  if (btn) btn.setAttribute('aria-expanded', String(abrir));
 }
+// Restaurar colapsado en desktop (Fase 1.5)
+try { if (!esMobile() && localStorage.getItem('rifas-sidebar-colapsado') === '1') document.getElementById('sidebar')?.classList.add('colapsado'); } catch (e) {}
 
 function toggleSidebar() {
   const sb = document.getElementById('sidebar');
@@ -356,7 +360,9 @@ const BADGE_ESTADO = { borrador: 'Borrador', activa: 'Activa', cerrada: 'Cerrada
 // ================================================================================
 function activarNav(route) {
   document.querySelectorAll('.nav-link').forEach(a => {
-    a.classList.toggle('active', route.startsWith(a.dataset.route) && a.dataset.route !== '');
+    const isActive = route.startsWith(a.dataset.route) && a.dataset.route !== '';
+    a.classList.toggle('active', isActive);
+    if (isActive) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 

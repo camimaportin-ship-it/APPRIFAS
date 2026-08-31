@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<a href="#view-container" class="skip-link">Saltar al contenido principal</a>
 
 <!-- ===================== LOGIN SCREEN ===================== -->
 <div id="login-screen" style="display:none; position:fixed; inset:0; z-index:9999; background:linear-gradient(135deg,#0B1229 0%,#16213F 50%,#0C1330 100%); align-items:center; justify-content:center; font-family:Sora,system-ui,sans-serif; overflow-y:auto;">
@@ -30,18 +31,18 @@
     <!-- Formulario -->
     <form id="login-form" style="background:rgba(255,255,255,0.06); backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:32px 28px;">
       <div style="margin-bottom:20px;">
-        <label style="display:block; color:rgba(255,255,255,0.7); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Usuario</label>
-        <input id="login-usuario" type="text" placeholder="Ingresa tu usuario" required autocomplete="username"
+        <label for="login-usuario" style="display:block; color:rgba(255,255,255,0.85); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Usuario</label>
+        <input id="login-usuario" type="text" placeholder="Ingresa tu usuario" required autocomplete="username" aria-required="true" aria-describedby="login-error"
           style="width:100%; padding:14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box; max-width:100%;"
           onfocus="this.style.borderColor='#D4A017'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
       </div>
       <div style="margin-bottom:14px;">
-        <label style="display:block; color:rgba(255,255,255,0.7); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Contraseña</label>
+        <label for="login-password" style="display:block; color:rgba(255,255,255,0.85); font-size:13px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Contraseña</label>
         <div style="position:relative;">
-          <input id="login-password" type="password" placeholder="Ingresa tu contraseña" required autocomplete="current-password"
+          <input id="login-password" type="password" placeholder="Ingresa tu contraseña" required autocomplete="current-password" aria-required="true" aria-describedby="login-error"
             style="width:100%; padding:14px 46px 14px 16px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:16px; outline:none; transition:border-color 0.2s; box-sizing:border-box; max-width:100%;"
             onfocus="this.style.borderColor='#D4A017'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
-          <button type="button" id="login-toggle-pass" aria-label="Mostrar u ocultar contraseña"
+          <button type="button" id="login-toggle-pass" aria-label="Mostrar u ocultar contraseña" aria-controls="login-password"
             style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:rgba(255,255,255,0.55); cursor:pointer; font-size:18px; padding:4px;">👁️</button>
         </div>
       </div>
@@ -61,7 +62,7 @@
         onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'">
         Iniciar Sesión
       </button>
-      <div id="login-error" style="display:none; margin-top:16px; padding:12px 16px; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fca5a5; font-size:14px; text-align:center;"></div>
+      <div id="login-error" role="alert" aria-live="polite" style="display:none; margin-top:16px; padding:12px 16px; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fca5a5; font-size:14px; text-align:center;"></div>
     </form>
 
     <p style="text-align:center; color:rgba(255,255,255,0.35); font-size:12px; margin-top:24px;">Rifas SYC v2.1.0</p>
@@ -72,7 +73,7 @@
 <div class="app-shell" id="app-shell" style="display:none;">
 
   <!-- ============================ SIDEBAR ============================ -->
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar" aria-label="Navegación principal">
     <div class="sidebar__brand">
       <div class="sidebar__brand-mark">🎲</div>
       <div>
@@ -80,8 +81,8 @@
         <div class="sidebar__brand-sub" id="empresa-nombre-sidebar">Sorteos y Concursos</div>
       </div>
     </div>
-    <nav id="nav-links">
-      <div class="nav-sec">Gestión</div>
+    <nav id="nav-links" aria-label="Menú principal">
+      <h2 class="nav-sec">Gestión</h2>
       <a href="#/rifas" class="nav-link" data-route="rifas">📋 <span>Mis Rifas</span></a>
       <a href="#/rifas/nueva" class="nav-link" data-route="rifas/nueva">➕ <span>Crear Rifa</span></a>
       <a href="#/papelera" class="nav-link" data-route="papelera">🗑️ <span>Papelera</span></a>
@@ -107,6 +108,11 @@
         <button onclick="logout()" class="sidebar-logout-btn">Cerrar sesión</button>
       </div>
       <p class="sidebar__legal">Decreto 2480 de 2005 · Modalidad promocional entre particulares. Cumpla normatividad Coljuegos.</p>
+      <div class="sidebar__footer-links" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; font-size:11px;">
+        <a href="/robots.txt" style="color:rgba(255,255,255,0.5);">Robots</a>
+        <a href="/sitemap.xml" style="color:rgba(255,255,255,0.5);">Sitemap</a>
+        <a href="https://www.coljuegos.gov.co" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.5);">Coljuegos</a>
+      </div>
     </div>
   </aside>
 
@@ -114,8 +120,8 @@
   <div class="main">
     <div class="topbar">
       <div class="flex items-center gap-3">
-        <button class="btn btn-ghost btn-sm" id="btn-toggle-sidebar" title="Mostrar / ocultar menú">☰</button>
-        <button class="btn btn-ghost btn-sm" id="btn-atras" title="Volver atrás" onclick="volverAtras()">←</button>
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-sidebar" title="Mostrar / ocultar menú" aria-label="Mostrar u ocultar menú" aria-expanded="false" aria-controls="sidebar">☰</button>
+        <button class="btn btn-ghost btn-sm" id="btn-atras" title="Volver atrás" aria-label="Volver atrás" onclick="volverAtras()">←</button>
         <h1 id="page-title">Mis Rifas</h1>
       </div>
       <div id="topbar-actions"></div>
@@ -123,6 +129,10 @@
     <div class="content" id="view-container">
       <!-- Las vistas se inyectan aquí desde app.js -->
     </div>
+    <footer class="app-footer" style="padding:16px 28px; border-top:1px solid var(--line); background:var(--surface); display:flex; gap:16px; flex-wrap:wrap; justify-content:space-between; align-items:center; font-size:12px; color:var(--ink-600);">
+      <span>© 2026 Rifas SYC — Sorteos y Concursos · <a href="/r/1" style="color:var(--navy-800);">Ver rifa demo</a></span>
+      <span><a href="https://www.coljuegos.gov.co" target="_blank" rel="noopener">Coljuegos</a> · <a href="/robots.txt">Robots</a> · <a href="/sitemap.xml">Sitemap</a> · <a href="#/changelog">v2.1.1</a></span>
+    </footer>
   </div>
 
 </div>
@@ -142,7 +152,7 @@
 <script src="/components/BaloteraCanvas.js"></script> 
 <script src="/components/Balotera4D.js"></script> 
 <script src="/components/LogicaSorteo.js"></script> 
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=4"></script>
 
 <script>
 // Registro del Service Worker para funcionamiento offline (PWA).
@@ -151,8 +161,12 @@
 if ('serviceWorker' in navigator && (window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    // Fase 2.3 — Banner "Nueva versión disponible"
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshing) return; refreshing = true; window.location.reload(); });
   });
 }
+function mostrarBannerUpdate(){ const b=document.createElement('div'); b.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0B1229;color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);z-index:9999;display:flex;gap:12px;align-items:center;'; b.innerHTML='Nueva versión disponible <button onclick="window.location.reload()" style="background:#D4A017;border:none;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Recargar</button>'; document.body.appendChild(b); }
 </script>
 <!-- Modal: Cambiar contraseña -->
 <div id="modal-cambiar-pass" style="display:none; position:fixed; inset:0; z-index:80; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
