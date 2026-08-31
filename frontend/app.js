@@ -463,6 +463,11 @@ let _rifasVista = 'grid'; // 'grid' | 'list'
 let _rifasFiltro = { estado: '', tipo: '', busqueda: '', categoria: '' };
 
 async function vistaListaRifas() {
+  // Corte real Fase — delega a módulo ES si está disponible, si no usa fallback clásico
+  try {
+    const mod = await import('./src/views/rifasList.js');
+    if (mod && mod.vistaListaRifasModular) return mod.vistaListaRifasModular(api, { toast, moverACarpeta, clonarRifa, eliminarRifa });
+  } catch (e) { /* fallback a código clásico */ }
   const [rifas, categorias] = await Promise.all([api('/rifas'), api('/categorias').catch(() => [])]);
   const rifasArr = Array.isArray(rifas) ? rifas : [];
   const catsArr = Array.isArray(categorias) ? categorias : [];
