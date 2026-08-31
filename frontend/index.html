@@ -146,12 +146,13 @@
 <script src="/vendor/chart.umd.js"></script>
 <script src="/vendor/canvas-confetti.js"></script>
 
-<!-- Componentes y lógica -->
+<!-- Componentes y lógica (lazy: chart solo cuando se necesita, pero precargado para offline) -->
 <script src="/components/RuletaCanvas.js"></script>
 <script src="/components/GeneradorImagen.js"></script>
 <script src="/components/BaloteraCanvas.js"></script> 
 <script src="/components/Balotera4D.js"></script> 
-<script src="/components/LogicaSorteo.js"></script> 
+<script src="/components/LogicaSorteo.js"></script>
+<script type="module" src="/src/main.js"></script> 
 <script src="/app.js?v=4"></script>
 
 <script>

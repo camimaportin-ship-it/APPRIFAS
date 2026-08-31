@@ -4,7 +4,10 @@
  * Router simple por hash para el panel de administración (#/rifas, #/rifas/:id...)
  * y un router por ruta real para la página pública (/public/rifa/:id), que es
  * la que va en el QR y debe funcionar como URL compartible normal.
+ * NOTA FASE 3: Wompi/Meta son stubs ocultos (FEATURE_WOMPI=false) — quedan para futuro.
  */
+const FEATURE_WOMPI = false; // Fase 3 stub — no usable ahora, solo backend
+const FEATURE_WA_CLOUD = false;
 
 // Modalidades de chance (las 3 primeras comparten la lógica de boletas_chance)
 function modoEsChance(rifa) {
@@ -1338,11 +1341,7 @@ async function renderResumen(rifa, d) {
         <button class="btn btn-outline btn-sm" onclick="copiarLinkReferido(${rifa.id})">📋 Copiar con ref</button>
       </div>
       <p class="text-xs text-ink-600">El link <code>/r/:id</code> tiene OG tags y redirige a <code>/#/rifas/:id</code>. Usa <code>?ref=CODIGO</code> para tracking.</p>
-      <div class="flex gap-2 mt-3">
-        <button class="btn btn-outline btn-sm" onclick="verPagos(${rifa.id})">💳 Ver pagos Wompi</button>
-        <a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/og-image" target="_blank">🖼️ Ver OG image</a>
-      </div>
-      <div id="pagos-lista" class="mt-3"></div>
+      ${FEATURE_WOMPI ? `<div class="flex gap-2 mt-3"><button class="btn btn-outline btn-sm" onclick="verPagos(${rifa.id})">💳 Ver pagos Wompi</button><a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/og-image" target="_blank">🖼️ Ver OG image</a></div><div id="pagos-lista" class="mt-3"></div>` : `<div class="flex gap-2 mt-3"><a class="btn btn-outline btn-sm" href="/api/rifas/${rifa.id}/og-image" target="_blank">🖼️ Ver OG image</a></div>`}
     </div>
 
     <div class="grid-2">
@@ -1486,7 +1485,7 @@ async function renderParticipantesTab(rifa, box) {
               </td>
               <td class="text-xs text-ink-600">${fmtFecha(p.fecha_registro)}</td>
               <td class="flex gap-2">
-                ${p.estado_pago === 'pendiente' ? `<button class="btn btn-gold btn-sm" title="Pagar con Wompi" onclick="iniciarCheckout(${rifa.id}, ${p.id})">💳</button>` : ''}
+                ${FEATURE_WOMPI && p.estado_pago === 'pendiente' ? `<button class="btn btn-gold btn-sm" title="Pagar con Wompi" onclick="iniciarCheckout(${rifa.id}, ${p.id})">💳</button>` : ''}
                 ${p.estado_pago === 'pendiente' ? `<button class="btn btn-ghost btn-sm" title="Enviar recordatorio" onclick='recordatorioWhatsapp(${safeAttr({ nombre: p.nombre, numeros: p.numeros || [p.numero], rifa_nombre: rifa.nombre, valor: rifa.valor_boleta, telefono: p.telefono })})'>💬</button>` : ''}
                 ${rifa.estado === 'activa' ? `<button class="btn btn-ghost btn-sm" title="Editar datos del participante" onclick='modalEditarParticipante(${rifa.id}, ${safeAttr({ id: p.id, nombre: p.nombre, telefono: p.telefono, cedula: p.cedula, numeros: p.numeros || [p.numero], estado_pago: p.estado_pago })})'>✏️</button>` : ''}
                 <button class="btn btn-ghost btn-sm" title="Eliminar / liberar número" onclick="eliminarParticipante(${p.id}, ${rifa.id})">🗑️</button>
