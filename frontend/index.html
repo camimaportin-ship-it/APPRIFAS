@@ -158,17 +158,15 @@
 
 <script>
 // Registro del Service Worker para funcionamiento offline (PWA).
-// Solo se activa en contexto seguro (https o localhost): en redes locales
-// por http://IP el navegador lo omite automáticamente, evitando errores.
-if ('serviceWorker' in navigator && (window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
-    // Fase 2.3 — Banner "Nueva versión disponible"
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshing) return; refreshing = true; window.location.reload(); });
-  });
-}
-function mostrarBannerUpdate(){ const b=document.createElement('div'); b.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0B1229;color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);z-index:9999;display:flex;gap:12px;align-items:center;'; b.innerHTML='Nueva versión disponible <button onclick="window.location.reload()" style="background:#D4A017;border:none;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Recargar</button>'; document.body.appendChild(b); }
+// Service Worker DESHABILITADO — sin servidor no se muestra nada cacheado.
+// Para re-habilitar PWA offline, descomentar el bloque siguiente:
+// if ('serviceWorker' in navigator && (window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+//   window.addEventListener('load', () => {
+//     navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+//     let refreshing = false;
+//     navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshing) return; refreshing = true; window.location.reload(); });
+//   });
+// }
 </script>
 <!-- Modal: Cambiar contraseña -->
 <div id="modal-cambiar-pass" style="display:none; position:fixed; inset:0; z-index:80; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
