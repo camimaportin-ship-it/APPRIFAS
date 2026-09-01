@@ -6,26 +6,28 @@ import { modoEsChance, nOport } from '../utils/format.js'; // asumen exportados 
 import { BADGE_ESTADO } from '../utils/constants.js';
 
 export async function vistaDetalleRifaModular(id, tab, deps = {}) {
-  const api = deps.api || window.api;
-  const toast = deps.toast || window.toast;
-  const clonarRifa = deps.clonarRifa || window.clonarRifa;
-  const eliminarRifa = deps.eliminarRifa || window.eliminarRifa;
-  const renderParticipantesTab = deps.renderParticipantesTab || window.renderParticipantesTab;
-  const renderPublicidadTab = deps.renderPublicidadTab || window.renderPublicidadTab;
-  const renderBaloteraTab = deps.renderBaloteraTab || window.renderBaloteraTab;
-  const renderSorteoTab = deps.renderSorteoTab || window.renderSorteoTab;
-  const renderWhatsappTab = deps.renderWhatsappTab || window.renderWhatsappTab;
-  const renderHistorialTab = deps.renderHistorialTab || window.renderHistorialTab;
-  const modalAplazarRifa = deps.modalAplazarRifa || window.modalAplazarRifa;
-  const safeAttr = deps.safeAttr || window.safeAttr;
-  const copiarLinkPublico = deps.copiarLinkPublico || window.copiarLinkPublico;
-  const generarReferido = deps.generarReferido || window.generarReferido;
-  const copiarLinkReferido = deps.copiarLinkReferido || window.copiarLinkReferido;
-  const verPagos = deps.verPagos || window.verPagos;
-  const descargarAutenticada = deps.descargarAutenticada || window.descargarAutenticada;
-  const exportarReportePDF = deps.exportarReportePDF || window.exportarReportePDF;
-  const abrirRestoreModal = deps.abrirRestoreModal || window.abrirRestoreModal;
-  const FEATURE_WOMPI = deps.FEATURE_WOMPI !== undefined ? deps.FEATURE_WOMPI : window.FEATURE_WOMPI;
+  const W = typeof window !== 'undefined' ? window : {};
+  const api = deps.api || W.api;
+  const toast = deps.toast || W.toast;
+  const moverACarpeta = deps.moverACarpeta || W.moverACarpeta;
+  const clonarRifa = deps.clonarRifa || W.clonarRifa;
+  const eliminarRifa = deps.eliminarRifa || W.eliminarRifa;
+  const renderParticipantesTab = deps.renderParticipantesTab || W.renderParticipantesTab;
+  const renderPublicidadTab = deps.renderPublicidadTab || W.renderPublicidadTab;
+  const renderBaloteraTab = deps.renderBaloteraTab || W.renderBaloteraTab;
+  const renderSorteoTab = deps.renderSorteoTab || W.renderSorteoTab;
+  const renderWhatsappTab = deps.renderWhatsappTab || W.renderWhatsappTab;
+  const renderHistorialTab = deps.renderHistorialTab || W.renderHistorialTab;
+  const modalAplazarRifa = deps.modalAplazarRifa || W.modalAplazarRifa;
+  const safeAttr = deps.safeAttr || W.safeAttr;
+  const copiarLinkPublico = deps.copiarLinkPublico || W.copiarLinkPublico;
+  const generarReferido = deps.generarReferido || W.generarReferido;
+  const copiarLinkReferido = deps.copiarLinkReferido || W.copiarLinkReferido;
+  const verPagos = deps.verPagos || W.verPagos;
+  const descargarAutenticada = deps.descargarAutenticada || W.descargarAutenticada;
+  const exportarReportePDF = deps.exportarReportePDF || W.exportarReportePDF;
+  const abrirRestoreModal = deps.abrirRestoreModal || W.abrirRestoreModal;
+  const FEATURE_WOMPI = deps.FEATURE_WOMPI !== undefined ? deps.FEATURE_WOMPI : W.FEATURE_WOMPI;
 
   const [rifa, dashboard] = await Promise.all([api('/rifas/' + id), api('/rifas/' + id + '/dashboard')]);
   state.rifaActual = rifa;
@@ -70,14 +72,14 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
 }
 
 // renderResumen modular — extraído de app.js:1283-1412
-export function renderResumenModular(rifa, d, deps = {}) {
-  const api = deps.api || window.api;
-  const fmtCOP = deps.fmtCOP || window.fmtCOP;
-  const fmtFecha = deps.fmtFecha || window.fmtFecha;
-  const escapeHtml = deps.escapeHtml || window.escapeHtml;
-  const modoEsChance = deps.modoEsChance || window.modoEsChance;
-  const nOport = deps.nOport || window.nOport;
-  const FEATURE_WOMPI = deps.FEATURE_WOMPI !== undefined ? deps.FEATURE_WOMPI : window.FEATURE_WOMPI;
+export async function renderResumenModular(rifa, d, deps = {}) {
+  const api = deps.api || (typeof window !== 'undefined' && window.api);
+  const fmtCOP = deps.fmtCOP || (typeof window !== 'undefined' && window.fmtCOP);
+  const fmtFecha = deps.fmtFecha || (typeof window !== 'undefined' && window.fmtFecha);
+  const escapeHtml = deps.escapeHtml || (typeof window !== 'undefined' && window.escapeHtml);
+  const modoEsChance = deps.modoEsChance || (typeof window !== 'undefined' && window.modoEsChance);
+  const nOport = deps.nOport || (typeof window !== 'undefined' && window.nOport);
+  const FEATURE_WOMPI = deps.FEATURE_WOMPI !== undefined ? deps.FEATURE_WOMPI : (typeof window !== 'undefined' && window.FEATURE_WOMPI);
 
   let dataNum = null;
   try { dataNum = await api('/rifas/' + rifa.id + '/numeros'); } catch (e) { /* sin red / error */ }
@@ -176,4 +178,4 @@ export function renderResumenModular(rifa, d, deps = {}) {
 }
 
 // Funciones legacy para compatibilidad (mantenidas en app.js globals)
-window.renderResumenModular = renderResumenModular;
+if (typeof window !== 'undefined') window.renderResumenModular = renderResumenModular;

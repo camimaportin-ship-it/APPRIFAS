@@ -4,15 +4,16 @@
 
 import { fmtCOP, fmtFecha, escapeHtml } from '../utils/format.js';
 import { BADGE_ESTADO } from '../utils/constants.js';
+import { moverACarpeta, clonarRifa, eliminarRifa } from '../utils/actions.js';
 
 let _rifasVista = 'grid';
 let _rifasFiltro = { estado: '', tipo: '', busqueda: '', categoria: '' };
 
 export async function vistaListaRifasModular(api, deps = {}) {
-  const toast = deps.toast || window.toast;
-  const moverACarpeta = deps.moverACarpeta || window.moverACarpeta;
-  const clonarRifa = deps.clonarRifa || window.clonarRifa;
-  const eliminarRifa = deps.eliminarRifa || window.eliminarRifa;
+  const toast = deps.toast || (typeof window !== 'undefined' && window.toast);
+  const moverACarpeta = deps.moverACarpeta || (typeof window !== 'undefined' && window.moverACarpeta);
+  const clonarRifa = deps.clonarRifa || (typeof window !== 'undefined' && window.clonarRifa);
+  const eliminarRifa = deps.eliminarRifa || (typeof window !== 'undefined' && window.eliminarRifa);
 
   const [rifas, categorias] = await Promise.all([api('/rifas'), api('/categorias').catch(() => [])]);
   const rifasArr = Array.isArray(rifas) ? rifas : [];
@@ -84,9 +85,9 @@ export async function vistaListaRifasModular(api, deps = {}) {
               <div class="rifas-list-item__actions">
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/rifas/${r.id}/editar'" title="Editar">✏️</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/pruebas/rifa/${r.id}'" title="Previsualizar">👁️</button>
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); moverACarpeta('${r.id}', '${escapeHtml(r.categoria || '')}')" title="Mover a carpeta">📁</button>
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); clonarRifa('${r.id}')" title="Clonar">📋</button>
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); eliminarRifa('${r.id}', '${escapeHtml(r.nombre)}')" title="Eliminar" style="color:var(--red-500);">🗑️</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); moverACarpeta('${r.id}', '${escapeHtml(r.categoria || '')}', { api, toast, router })" title="Mover a carpeta">📁</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); clonarRifa('${r.id}', { api, toast })" title="Clonar">📋</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); eliminarRifa('${r.id}', '${escapeHtml(r.nombre)}', { api, toast, state: window.state })" title="Eliminar" style="color:var(--red-500);">🗑️</button>
               </div>
             </a>`).join('')}
         </div>`;
