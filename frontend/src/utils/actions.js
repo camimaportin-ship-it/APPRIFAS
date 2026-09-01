@@ -18,7 +18,7 @@ export function moverACarpeta(id, carpetaActual, deps = {}) {
   }).catch(e => toast(e.message, 'error'));
 }
 
-export function clonarRifa(id, deps = {}) {
+export async function clonarRifa(id, deps = {}) {
   const api = deps.api || window.api;
   const toast = deps.toast || window.toast;
 
@@ -30,10 +30,10 @@ export function clonarRifa(id, deps = {}) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-export function eliminarRifa(id, nombre, deps = {}) {
+export async function eliminarRifa(id, nombre, deps = {}) {
   const api = deps.api || window.api;
   const toast = deps.toast || window.toast;
-  const rifa = deps.state && deps.state.rifaActual ? deps.state.rifaActual : window.state.rifaActual || {};
+  const rifa = (deps.state && deps.state.rifaActual) || {};
   const nombreMostrar = nombre || rifa.nombre || id;
 
   if (!confirm(`¿Eliminar "${nombreMostrar}"? Se moverá a la papelera y podrás restaurarla desde el filtro "Eliminadas".`)) return;
