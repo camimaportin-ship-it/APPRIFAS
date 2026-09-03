@@ -24,3 +24,9 @@ AUDIT.md
 
 # Posters generados (se crean en runtime)
 uploads/poster-*.png
+
+# Uploads (imágenes subidas por usuarios)
+uploads/
+
+# PDFs temporales
+*.pdf
