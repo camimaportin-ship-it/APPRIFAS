@@ -4,7 +4,7 @@
   "description": "Rifas SYC - Sistema de rifas independiente: 6 modalidades de boleta, grilla de elección, generador de poster 1080x1080, balotera virtual animada y envío masivo de WhatsApp personalizado sin pagar API de Meta.",
   "main": "server.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "server": "node server.js",
