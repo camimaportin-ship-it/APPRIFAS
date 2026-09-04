@@ -31,8 +31,10 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
 
   const [rifa, dashboard] = await Promise.all([api('/rifas/' + id), api('/rifas/' + id + '/dashboard')]);
   state.rifaActual = rifa;
-  document.getElementById('page-title').textContent = rifa.nombre;
-  document.getElementById('topbar-actions').innerHTML = `
+  const pageTitle = document.getElementById('page-title');
+  if (pageTitle) pageTitle.textContent = rifa.nombre;
+  const topbar = document.getElementById('topbar-actions');
+  if (topbar) topbar.innerHTML = `
     <div class="flex gap-2">
       <span class="badge badge-${rifa.estado}">${BADGE_ESTADO[rifa.estado]}</span>
       <a href="#/rifas/${id}/editar" class="btn btn-outline btn-sm">✏️ Editar</a>
@@ -49,7 +51,6 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
   const prev = tabs[idxActual - 1];
   const next = tabs[idxActual + 1];
 
-  const box = document.getElementById('tab-content');
   const container = document.getElementById('view-container');
   container.innerHTML = `
     <div class="tabs">
@@ -61,6 +62,7 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
       <a class="btn btn-ghost btn-sm" href="#/rifas">⬅ Volver a mis rifas</a>
       ${next ? `<a class="btn btn-gold btn-sm" href="#/rifas/${id}/${next[1]}">${next[1]} →</a>` : '<span></span>'}
     </div>`;
+  const box = document.getElementById('tab-content');
 
   if (tab === 'resumen') box.innerHTML = renderResumenModular(rifa, dashboard, { api, FEATURE_WOMPI });
   else if (tab === 'participantes') await (renderParticipantesTab || renderParticipantesTabOld)(rifa, box);
