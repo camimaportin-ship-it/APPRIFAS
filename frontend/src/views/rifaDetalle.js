@@ -64,7 +64,7 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
     </div>`;
   const box = document.getElementById('tab-content');
 
-  if (tab === 'resumen') box.innerHTML = renderResumenModular(rifa, dashboard, { api, FEATURE_WOMPI });
+  if (tab === 'resumen') box.innerHTML = await renderResumenModular(rifa, dashboard, { api, FEATURE_WOMPI });
   else if (tab === 'participantes') await (renderParticipantesTab || renderParticipantesTabOld)(rifa, box);
   else if (tab === 'publicidad') await (renderPublicidadTab || renderPublicidadTabOld)(rifa, dashboard, box);
   else if (tab === 'balotera') await (renderBaloteraTab || renderBaloteraTabOld)(rifa, box);
