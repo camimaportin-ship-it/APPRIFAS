@@ -1497,10 +1497,11 @@ async function renderParticipantesTab(rifa, box) {
             <option value="pagados" ${_filtSel === 'pagados' ? 'selected' : ''}>🟢 Pagados (${pagadosArr.length})</option>
             <option value="pendientes" ${_filtSel === 'pendientes' ? 'selected' : ''}>🟡 Pendientes (${pendientesArr.length})</option>
           </select>
+          ${pendientesArr.length > 0 ? `<button class="btn btn-gold btn-sm" onclick="modalPagoTodos(${rifa.id})" title="Marcar todos los pendientes como pagados">💰 Pagar todos (${pendientesArr.length})</button>` : ''}
         </div>
         <div class="flex gap-2 items-center" id="acciones-masivas" style="${_selIds.length === 0 ? 'display:none;' : ''}">
           <span style="font-size:12px; color:var(--ink-600);">${_selIds.length} seleccionado(s)</span>
-          <button class="btn btn-gold btn-sm" onclick="modalPagoMasivo(${rifa.id})">💰 Marcar pagados</button>
+          <button class="btn btn-gold btn-sm" onclick="modalPagoMasivo(${rifa.id})">💰 Cambiar estado</button>
           <button class="btn btn-ghost btn-sm" onclick="_limpiarSeleccionPart()">✕ Cancelar</button>
         </div>
       </div>
@@ -1596,38 +1597,85 @@ function _limpiarSeleccionPart() {
   if (box && rifa) renderParticipantesTab(rifa, box);
 }
 
+function modalPagoTodos(rifaId) {
+  const participantes = state.participantesActual || [];
+  const pendientes = participantes.filter(p => p.estado_pago === 'pendiente');
+  if (!pendientes.length) return toast('No hay participantes pendientes', 'info');
+  state._partSeleccion = pendientes.map(p => p.id);
+  modalPagoMasivo(rifaId);
+}
+
 function modalPagoMasivo(rifaId) {
   const ids = state._partSeleccion || [];
-  if (!ids.length) return toast('Selecciona al menos un participante', 'error');
   const participantes = state.participantesActual || [];
   const seleccionados = participantes.filter(p => ids.includes(p.id));
+
+  if (!seleccionados.length) {
+    const pendientes = participantes.filter(p => p.estado_pago === 'pendiente');
+    if (!pendientes.length) return toast('No hay participantes pendientes', 'info');
+    state._partSeleccion = pendientes.map(p => p.id);
+    return modalPagoMasivo(rifaId);
+  }
+
   const pendientes = seleccionados.filter(p => p.estado_pago === 'pendiente');
-  if (!pendientes.length) return toast('Todos los seleccionados ya están pagados', 'info');
+  const pagados = seleccionados.filter(p => p.estado_pago === 'pagado');
+
+  const total = seleccionados.length;
+  const titulo = pagados.length > 0 && pendientes.length > 0
+    ? `Cambiar estado — ${total} participante(s)`
+    : pendientes.length > 0
+      ? `Marcar pagados — ${pendientes.length} pendiente(s)`
+      : `Marcar pendientes — ${pagados.length} pagado(s)`;
 
   abrirModal(`
-    <div class="modal__header"><h3>Pago masivo — ${pendientes.length} participante(s)</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
+    <div class="modal__header"><h3>${titulo}</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
     <form id="form-pago-masivo" class="modal__body" onsubmit="event.preventDefault(); _confirmarPagoMasivo(${rifaId});">
-      <p style="font-size:13px; margin:0 0 12px; color:var(--ink-600);">Se marcarán como <strong>pagados</strong> los siguientes participantes:</p>
+      <p style="font-size:13px; margin:0 0 12px; color:var(--ink-600);">Se actualizará el estado de los siguientes participantes:</p>
       <div style="max-height:120px; overflow-y:auto; margin-bottom:16px; padding:8px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid var(--line);">
-        ${pendientes.map(p => `<div style="font-size:12px; padding:3px 0; display:flex; gap:8px;"><span class="mono" style="font-weight:700; min-width:40px;">${mostrarNumerosBoleta(state.rifaActual, p)}</span><span>${escapeHtml(p.nombre)}</span></div>`).join('')}
+        ${seleccionados.map(p => `<div style="font-size:12px; padding:3px 0; display:flex; gap:8px; align-items:center;">
+          <span style="color:${p.estado_pago === 'pagado' ? '#22c55e' : '#f59e0b'}; font-size:10px;">●</span>
+          <span class="mono" style="font-weight:700; min-width:40px;">${mostrarNumerosBoleta(state.rifaActual, p)}</span>
+          <span>${escapeHtml(p.nombre)}</span>
+          <span style="font-size:11px; color:var(--ink-600); margin-left:auto;">${p.estado_pago === 'pagado' ? 'Pagado' : 'Pendiente'}</span>
+        </div>`).join('')}
       </div>
-      <div style="margin-bottom:12px;">
-        <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Método de pago *</label>
-        <select class="input" id="masivo-metodo" required style="font-size:13px;">
-          <option value="">Seleccionar...</option>
-          <option value="efectivo">Efectivo</option>
-          <option value="transferencia">Transferencia</option>
-          <option value="nequi">Nequi</option>
-          <option value="daviplata">Daviplata</option>
-          <option value="wompi">Wompi</option>
-          <option value="otro">Otro</option>
-        </select>
-      </div>
+
       <div style="margin-bottom:16px;">
-        <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Observación (opcional)</label>
-        <input class="input" id="masivo-observacion" placeholder="Ej: Pago en efectivo, comprobante #123" maxlength="200" style="font-size:13px;">
+        <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:6px; text-transform:uppercase;">Marcar como *</label>
+        <div style="display:flex; gap:8px;">
+          <label style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:2px solid #22c55e; background:rgba(34,197,94,0.1); cursor:pointer; flex:1; text-align:center; justify-content:center;">
+            <input type="radio" name="masivo-estado" value="pagado" checked style="display:none;" onchange="document.getElementById('campos-pago-masivo').style.display='grid';">
+            <span style="font-size:13px; font-weight:600; color:#22c55e;">✅ Pagado</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:2px solid #f59e0b; background:rgba(245,158,11,0.1); cursor:pointer; flex:1; text-align:center; justify-content:center;">
+            <input type="radio" name="masivo-estado" value="pendiente" style="display:none;" onchange="document.getElementById('campos-pago-masivo').style.display='none';">
+            <span style="font-size:13px; font-weight:600; color:#f59e0b;">⏳ Pendiente</span>
+          </label>
+        </div>
       </div>
-      <button type="submit" class="btn btn-gold" style="width:100%;">💰 Confirmar pago de ${pendientes.length} participante(s)</button>
+
+      <div id="campos-pago-masivo" style="display:grid; gap:12px;">
+        <div>
+          <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Método de pago *</label>
+          <select class="input" id="masivo-metodo" style="font-size:13px;">
+            <option value="">Seleccionar...</option>
+            <option value="efectivo">Efectivo</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="nequi">Nequi</option>
+            <option value="daviplata">Daviplata</option>
+            <option value="wompi">Wompi</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Observación (opcional)</label>
+          <input class="input" id="masivo-observacion" placeholder="Ej: Pago en efectivo, comprobante #123" maxlength="200" style="font-size:13px;">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-gold" style="width:100%; margin-top:16px;">
+        Confirmar cambio de estado para ${total} participante(s)
+      </button>
     </form>
   `);
 }
@@ -1636,22 +1684,34 @@ async function _confirmarPagoMasivo(rifaId) {
   const ids = state._partSeleccion || [];
   const participantes = state.participantesActual || [];
   const seleccionados = participantes.filter(p => ids.includes(p.id));
-  const pendientes = seleccionados.filter(p => p.estado_pago === 'pendiente');
-  const metodo = document.getElementById('masivo-metodo')?.value;
+  if (!seleccionados.length) return toast('No hay participantes seleccionados', 'error');
+
+  const radios = document.querySelectorAll('input[name="masivo-estado"]');
+  let nuevoEstado = 'pagado';
+  radios.forEach(r => { if (r.checked) nuevoEstado = r.value; });
+
+  const metodo = document.getElementById('masivo-metodo')?.value || '';
   const observacion = (document.getElementById('masivo-observacion')?.value || '').trim();
 
-  if (!metodo) return toast('Selecciona un método de pago', 'error');
-  if (!pendientes.length) return toast('No hay participantes pendientes seleccionados', 'error');
+  if (nuevoEstado === 'pagado' && !metodo) return toast('Selecciona un método de pago', 'error');
 
   cerrarModal();
   let exitos = 0;
   let fallos = 0;
-  for (const p of pendientes) {
+  for (const p of seleccionados) {
     try {
+      const body = { estado_pago: nuevoEstado };
+      if (nuevoEstado === 'pagado') {
+        body.metodo_pago = metodo;
+        body.observacion = observacion || null;
+      } else {
+        body.metodo_pago = null;
+        body.observacion = observacion || null;
+      }
       await api('/participantes/' + p.id, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ estado_pago: 'pagado', metodo_pago: metodo, observacion: observacion || null })
+        body: JSON.stringify(body)
       });
       exitos++;
     } catch (e) {
@@ -1659,7 +1719,8 @@ async function _confirmarPagoMasivo(rifaId) {
     }
   }
   state._partSeleccion = [];
-  toast(exitos > 0 ? `✅ ${exitos} participante(s) marcado(s) como pagado(s)` : 'No se pudo actualizar', exitos > 0 ? 'success' : 'error');
+  const label = nuevoEstado === 'pagado' ? 'pagado(s)' : 'pendiente(s)';
+  toast(exitos > 0 ? `✅ ${exitos} participante(s) marcado(s) como ${label}` : 'No se pudo actualizar', exitos > 0 ? 'success' : 'error');
   if (fallos > 0) toast(`${fallos} error(es) al actualizar`, 'error');
   const rifa = state.rifaActual;
   const box = document.querySelector('#tab-content');
