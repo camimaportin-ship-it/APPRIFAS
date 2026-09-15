@@ -1423,8 +1423,6 @@ async function renderParticipantesTab(rifa, box) {
 
   const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
   const esChance = modoEsChance(rifa);
-  // En 4 Oportunidades los conteos de la leyenda se miden en GRUPOS
-  // (la unidad de venta real), no en números sueltos. En CHANCE en boletas.
   const libres = esCuatro
     ? grupos.filter(g => g.estado === 'libre').length
     : (esChance ? boletas.filter(b => b.estado === 'libre').length : numeros.filter(n => n.estado === 'libre').length);
@@ -1436,6 +1434,13 @@ async function renderParticipantesTab(rifa, box) {
     : (esChance ? boletas.filter(b => b.estado === 'pagado').length : numeros.filter(n => n.estado === 'pagado').length);
 
   const leyendaUnidad = esChance ? 'boletas' : (esCuatro ? 'grupos' : 'números');
+
+  const _filtSel = state._partFiltro || 'todos';
+  const _selIds = state._partSeleccion || [];
+  const pendientesArr = participantes.filter(p => p.estado_pago === 'pendiente');
+  const pagadosArr = participantes.filter(p => p.estado_pago === 'pagado');
+
+  const filtrados = _filtSel === 'pagados' ? pagadosArr : _filtSel === 'pendientes' ? pendientesArr : participantes;
 
   box.innerHTML = `
     <div class="flex justify-between items-center mb-3" style="flex-wrap:wrap; gap:10px;">
@@ -1484,11 +1489,30 @@ async function renderParticipantesTab(rifa, box) {
 
     <div class="card" style="overflow-x:auto;">
       ${participantes.length === 0 ? `<div class="empty-state"><div class="icon">👥</div><p>Aún no hay participantes registrados</p></div>` : `
+      <div style="padding:12px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div class="flex gap-2 items-center">
+          <label style="font-size:13px; font-weight:600;">Filtrar:</label>
+          <select class="input" id="filtro-pago-part" style="padding:4px 8px; font-size:12px; width:auto;" onchange="_cambiarFiltroParticipantes(this.value, ${rifa.id})">
+            <option value="todos" ${_filtSel === 'todos' ? 'selected' : ''}>Todos (${participantes.length})</option>
+            <option value="pagados" ${_filtSel === 'pagados' ? 'selected' : ''}>🟢 Pagados (${pagadosArr.length})</option>
+            <option value="pendientes" ${_filtSel === 'pendientes' ? 'selected' : ''}>🟡 Pendientes (${pendientesArr.length})</option>
+          </select>
+        </div>
+        <div class="flex gap-2 items-center" id="acciones-masivas" style="${_selIds.length === 0 ? 'display:none;' : ''}">
+          <span style="font-size:12px; color:var(--ink-600);">${_selIds.length} seleccionado(s)</span>
+          <button class="btn btn-gold btn-sm" onclick="modalPagoMasivo(${rifa.id})">💰 Marcar pagados</button>
+          <button class="btn btn-ghost btn-sm" onclick="_limpiarSeleccionPart()">✕ Cancelar</button>
+        </div>
+      </div>
       <table class="tbl">
-        <thead><tr><th>Boleta</th><th>Nombre</th><th>Teléfono</th><th>Estado</th><th>Registrado</th><th></th></tr></thead>
+        <thead><tr>
+          <th style="width:36px; text-align:center;"><input type="checkbox" id="chk-todos-part" onchange="_toggleTodosPart(this.checked, ${rifa.id})" title="Seleccionar todos los visibles"></th>
+          <th>Boleta</th><th>Nombre</th><th>Teléfono</th><th>Estado</th><th>Registrado</th><th></th>
+        </tr></thead>
         <tbody>
-          ${participantes.map(p => `
-            <tr>
+          ${filtrados.map(p => `
+            <tr style="${_selIds.includes(p.id) ? 'background:rgba(212,160,23,0.08);' : ''}">
+              <td style="text-align:center;"><input type="checkbox" ${_selIds.includes(p.id) ? 'checked' : ''} onchange="_togglePartSeleccion(${p.id}, ${rifa.id})"></td>
               <td class="mono" style="font-weight:700;">${mostrarNumerosBoleta(rifa, p)}</td>
               <td>${escapeHtml(p.nombre)}</td>
               <td class="mono text-sm">${escapeHtml(p.telefono || '—')}</td>
@@ -1511,7 +1535,6 @@ async function renderParticipantesTab(rifa, box) {
     </div>`;
 
   if (esChance) {
-    // Mapa de boletas del chance: el símbolo activo define la grilla 00-99
     const simbolosBox = document.getElementById('chance-simbolos');
     const mapaBox = document.getElementById('chance-mapa-boletas');
     let simboloActivo = simbolos[0] || '';
@@ -1532,6 +1555,115 @@ async function renderParticipantesTab(rifa, box) {
     });
     pintarMapa();
   }
+}
+
+function _cambiarFiltroParticipantes(valor, rifaId) {
+  state._partFiltro = valor;
+  state._partSeleccion = [];
+  const rifa = state.rifaActual;
+  const box = document.querySelector('#tab-content');
+  if (box && rifa) renderParticipantesTab(rifa, box);
+}
+
+function _togglePartSeleccion(pid, rifaId) {
+  if (!state._partSeleccion) state._partSeleccion = [];
+  const idx = state._partSeleccion.indexOf(pid);
+  if (idx >= 0) state._partSeleccion.splice(idx, 1);
+  else state._partSeleccion.push(pid);
+  const rifa = state.rifaActual;
+  const box = document.querySelector('#tab-content');
+  if (box && rifa) renderParticipantesTab(rifa, box);
+}
+
+function _toggleTodosPart(checked, rifaId) {
+  const participantes = state.participantesActual || [];
+  const filtro = state._partFiltro || 'todos';
+  const filtrados = filtro === 'pagados'
+    ? participantes.filter(p => p.estado_pago === 'pagado')
+    : filtro === 'pendientes'
+      ? participantes.filter(p => p.estado_pago === 'pendiente')
+      : participantes;
+  state._partSeleccion = checked ? filtrados.map(p => p.id) : [];
+  const rifa = state.rifaActual;
+  const box = document.querySelector('#tab-content');
+  if (box && rifa) renderParticipantesTab(rifa, box);
+}
+
+function _limpiarSeleccionPart() {
+  state._partSeleccion = [];
+  const rifa = state.rifaActual;
+  const box = document.querySelector('#tab-content');
+  if (box && rifa) renderParticipantesTab(rifa, box);
+}
+
+function modalPagoMasivo(rifaId) {
+  const ids = state._partSeleccion || [];
+  if (!ids.length) return toast('Selecciona al menos un participante', 'error');
+  const participantes = state.participantesActual || [];
+  const seleccionados = participantes.filter(p => ids.includes(p.id));
+  const pendientes = seleccionados.filter(p => p.estado_pago === 'pendiente');
+  if (!pendientes.length) return toast('Todos los seleccionados ya están pagados', 'info');
+
+  abrirModal(`
+    <div class="modal__header"><h3>Pago masivo — ${pendientes.length} participante(s)</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
+    <form id="form-pago-masivo" class="modal__body" onsubmit="event.preventDefault(); _confirmarPagoMasivo(${rifaId});">
+      <p style="font-size:13px; margin:0 0 12px; color:var(--ink-600);">Se marcarán como <strong>pagados</strong> los siguientes participantes:</p>
+      <div style="max-height:120px; overflow-y:auto; margin-bottom:16px; padding:8px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid var(--line);">
+        ${pendientes.map(p => `<div style="font-size:12px; padding:3px 0; display:flex; gap:8px;"><span class="mono" style="font-weight:700; min-width:40px;">${mostrarNumerosBoleta(state.rifaActual, p)}</span><span>${escapeHtml(p.nombre)}</span></div>`).join('')}
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Método de pago *</label>
+        <select class="input" id="masivo-metodo" required style="font-size:13px;">
+          <option value="">Seleccionar...</option>
+          <option value="efectivo">Efectivo</option>
+          <option value="transferencia">Transferencia</option>
+          <option value="nequi">Nequi</option>
+          <option value="daviplata">Daviplata</option>
+          <option value="wompi">Wompi</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Observación (opcional)</label>
+        <input class="input" id="masivo-observacion" placeholder="Ej: Pago en efectivo, comprobante #123" maxlength="200" style="font-size:13px;">
+      </div>
+      <button type="submit" class="btn btn-gold" style="width:100%;">💰 Confirmar pago de ${pendientes.length} participante(s)</button>
+    </form>
+  `);
+}
+
+async function _confirmarPagoMasivo(rifaId) {
+  const ids = state._partSeleccion || [];
+  const participantes = state.participantesActual || [];
+  const seleccionados = participantes.filter(p => ids.includes(p.id));
+  const pendientes = seleccionados.filter(p => p.estado_pago === 'pendiente');
+  const metodo = document.getElementById('masivo-metodo')?.value;
+  const observacion = (document.getElementById('masivo-observacion')?.value || '').trim();
+
+  if (!metodo) return toast('Selecciona un método de pago', 'error');
+  if (!pendientes.length) return toast('No hay participantes pendientes seleccionados', 'error');
+
+  cerrarModal();
+  let exitos = 0;
+  let fallos = 0;
+  for (const p of pendientes) {
+    try {
+      await api('/participantes/' + p.id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado_pago: 'pagado', metodo_pago: metodo, observacion: observacion || null })
+      });
+      exitos++;
+    } catch (e) {
+      fallos++;
+    }
+  }
+  state._partSeleccion = [];
+  toast(exitos > 0 ? `✅ ${exitos} participante(s) marcado(s) como pagado(s)` : 'No se pudo actualizar', exitos > 0 ? 'success' : 'error');
+  if (fallos > 0) toast(`${fallos} error(es) al actualizar`, 'error');
+  const rifa = state.rifaActual;
+  const box = document.querySelector('#tab-content');
+  if (box && rifa) renderParticipantesTab(rifa, box);
 }
 
 // Tablero de los grupos de múltiples oportunidades (cada boleta = un grupo).
