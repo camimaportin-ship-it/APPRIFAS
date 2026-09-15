@@ -2520,27 +2520,27 @@ function _renderModalSeleccion() {
   root.innerHTML = `
     <div style="position:fixed; inset:0; z-index:90; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:16px;">
       <div style="width:100%; max-width:780px; max-height:90vh; background:#16213F; border:1px solid #22315A; border-radius:18px; display:flex; flex-direction:column; overflow:hidden;">
-        <div style="padding:20px 24px 12px; border-bottom:1px solid var(--line);">
+        <div style="padding:20px 24px 12px; border-bottom:1px solid #22315A;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h3 style="margin:0;">🔢 Seleccionar ${etiquetaItems} — ${escapeHtml(s.rifa.nombre)}</h3>
+            <h3 style="margin:0; color:#FFFFFF; font-size:16px;">🔢 Seleccionar ${etiquetaItems} — ${escapeHtml(s.rifa.nombre)}</h3>
             <button class="btn btn-ghost btn-sm" onclick="state._seleccionNumeros=null; cerrarModal();">✕</button>
           </div>
-          <p class="text-sm text-ink-600" style="margin:4px 0 0;">${libres.length} ${etiquetaItems} disponibles · ${totalSel} seleccionados · ${s.registrados} registrados</p>
+          <p style="margin:4px 0 0; font-size:12px; color:#8B94B3;">${libres.length} ${etiquetaItems} disponibles · ${totalSel} seleccionados · ${s.registrados} registrados</p>
         </div>
 
         <div style="display:flex; flex:1; overflow:hidden;">
-          <div style="flex:1; overflow-y:auto; padding:16px; border-right:1px solid var(--line);">
+          <div style="flex:1; overflow-y:auto; padding:16px; border-right:1px solid #22315A;">
             ${esCuatro ? _renderGruposSeleccion(libres, seleccionados, s)
               : chance ? _renderBoletasSeleccion(libres, seleccionados, s)
               : _renderNumerosSeleccion(libres, seleccionados, s)}
           </div>
 
-          <div style="width:280px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px;">
+          <div style="width:300px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px;">
             <div>
-              <p style="font-weight:600; font-size:13px; margin:0 0 8px;">${esCuatro ? 'Grupos' : chance ? 'Boletas' : 'Números'} seleccionados</p>
+              <p style="font-weight:600; font-size:13px; margin:0 0 8px; color:#D4D8E8;">${esCuatro ? 'Grupos' : chance ? 'Boletas' : 'Números'} seleccionados</p>
               <div style="display:flex; flex-wrap:wrap; gap:4px; min-height:32px;">
                 ${seleccionados.length === 0
-                  ? `<span class="text-xs text-ink-600">Haz clic en un ${etiquetaItem} para seleccionarlo</span>`
+                  ? `<span style="font-size:12px; color:#6B7A99;">Haz clic en un ${etiquetaItem} para seleccionarlo</span>`
                   : esCuatro
                     ? seleccionados.map(gi => {
                         const g = s.grupos[gi];
@@ -2554,33 +2554,81 @@ function _renderModalSeleccion() {
               </div>
             </div>
 
-            <div style="border-top:1px solid var(--line); padding-top:12px;">
-              <p style="font-weight:600; font-size:13px; margin:0 0 8px;">Datos del participante</p>
+            <div style="border-top:1px solid #22315A; padding-top:12px;">
+              <p style="font-weight:600; font-size:13px; margin:0 0 8px; color:#D4D8E8;">Datos del participante</p>
               <div style="margin-bottom:8px;">
-                <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Nombre *</label>
+                <label style="display:block; font-size:11px; color:#8B94B3; margin-bottom:4px; text-transform:uppercase;">Nombre *</label>
                 <input id="sel-nombre" class="input" placeholder="Nombre completo" maxlength="120" style="font-size:13px;">
               </div>
               <div style="margin-bottom:8px;">
-                <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Teléfono</label>
+                <label style="display:block; font-size:11px; color:#8B94B3; margin-bottom:4px; text-transform:uppercase;">Teléfono</label>
                 <input id="sel-telefono" class="input" placeholder="Opcional" inputmode="tel" maxlength="20" style="font-size:13px;">
               </div>
               <div style="margin-bottom:12px;">
-                <label style="display:block; font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase;">Cédula</label>
+                <label style="display:block; font-size:11px; color:#8B94B3; margin-bottom:4px; text-transform:uppercase;">Cédula</label>
                 <input id="sel-cedula" class="input" placeholder="Opcional" inputmode="numeric" style="font-size:13px;">
               </div>
-              <button class="btn btn-gold btn-sm" style="width:100%;" onclick="_registrarDesdeSeleccion()"
-                ${seleccionados.length === 0 ? 'disabled style="width:100%; opacity:0.5;"' : ''}>
-                Registrar participante (${totalSel} número${totalSel !== 1 ? 's' : ''})
-              </button>
             </div>
 
-            <div style="margin-top:auto; padding-top:12px; border-top:1px solid var(--line); display:flex; gap:6px;">
+            <div style="border-top:1px solid #22315A; padding-top:12px;">
+              <p style="font-weight:600; font-size:13px; margin:0 0 8px; color:#D4D8E8;">Estado del pago</p>
+              <div style="display:flex; gap:6px; margin-bottom:10px;">
+                <label style="flex:1; display:flex; align-items:center; justify-content:center; gap:5px; padding:7px 0; border-radius:8px; border:2px solid #f59e0b; background:rgba(245,158,11,0.1); cursor:pointer; font-size:12px; font-weight:600; color:#f59e0b;" id="sel-pago-pend-label">
+                  <input type="radio" name="sel-estado-pago" value="pendiente" checked style="display:none;" onchange="_selEstadoPagoCambio('pendiente')">
+                  ⏳ Pendiente
+                </label>
+                <label style="flex:1; display:flex; align-items:center; justify-content:center; gap:5px; padding:7px 0; border-radius:8px; border:2px solid #22315A; background:rgba(255,255,255,0.02); cursor:pointer; font-size:12px; font-weight:600; color:#6B7A99;" id="sel-pago-pagado-label">
+                  <input type="radio" name="sel-estado-pago" value="pagado" style="display:none;" onchange="_selEstadoPagoCambio('pagado')">
+                  ✅ Pagado
+                </label>
+              </div>
+              <div id="sel-campos-pago" style="display:none; gap:8px;">
+                <div style="margin-bottom:8px;">
+                  <label style="display:block; font-size:11px; color:#8B94B3; margin-bottom:4px; text-transform:uppercase;">Método de pago *</label>
+                  <select class="input" id="sel-metodo-pago" style="font-size:13px;">
+                    <option value="">Seleccionar...</option>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="nequi">Nequi</option>
+                    <option value="daviplata">Daviplata</option>
+                    <option value="wompi">Wompi</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block; font-size:11px; color:#8B94B3; margin-bottom:4px; text-transform:uppercase;">Observación</label>
+                  <input class="input" id="sel-obs-pago" placeholder="Comprobante, notas..." maxlength="200" style="font-size:13px;">
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-gold" style="width:100%; margin-top:4px;" onclick="_registrarDesdeSeleccion()"
+              ${seleccionados.length === 0 ? 'disabled style="width:100%; opacity:0.5; margin-top:4px;"' : ''}>
+              Registrar participante (${totalSel} número${totalSel !== 1 ? 's' : ''})
+            </button>
+
+            <div style="margin-top:auto; padding-top:12px; border-top:1px solid #22315A; display:flex; gap:6px;">
               <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="state._seleccionNumeros=null; cerrarModal();">Cerrar</button>
             </div>
           </div>
         </div>
       </div>
     </div>`;
+}
+
+function _selEstadoPagoCambio(valor) {
+  const campos = document.getElementById('sel-campos-pago');
+  const labelPend = document.getElementById('sel-pago-pend-label');
+  const labelPag = document.getElementById('sel-pago-pagado-label');
+  if (valor === 'pagado') {
+    campos.style.display = 'grid';
+    if (labelPag) { labelPag.style.borderColor = '#22c55e'; labelPag.style.background = 'rgba(34,197,94,0.1)'; labelPag.style.color = '#22c55e'; }
+    if (labelPend) { labelPend.style.borderColor = '#22315A'; labelPend.style.background = 'rgba(255,255,255,0.02)'; labelPend.style.color = '#6B7A99'; }
+  } else {
+    campos.style.display = 'none';
+    if (labelPend) { labelPend.style.borderColor = '#f59e0b'; labelPend.style.background = 'rgba(245,158,11,0.1)'; labelPend.style.color = '#f59e0b'; }
+    if (labelPag) { labelPag.style.borderColor = '#22315A'; labelPag.style.background = 'rgba(255,255,255,0.02)'; labelPag.style.color = '#6B7A99'; }
+  }
 }
 
 function _renderNumerosSeleccion(libres, seleccionados, s) {
@@ -2661,14 +2709,24 @@ async function _registrarDesdeSeleccion() {
   if (!nombre) { toast('El nombre es obligatorio', 'error'); return; }
   const telefono = (document.getElementById('sel-telefono')?.value || '').trim();
   const cedula = (document.getElementById('sel-cedula')?.value || '').trim();
+  const radios = document.querySelectorAll('input[name="sel-estado-pago"]');
+  let estadoPago = 'pendiente';
+  radios.forEach(r => { if (r.checked) estadoPago = r.value; });
+  const metodoPago = (document.getElementById('sel-metodo-pago')?.value || '').trim();
+  const observacion = (document.getElementById('sel-obs-pago')?.value || '').trim();
+  if (estadoPago === 'pagado' && !metodoPago) return toast('Selecciona un método de pago', 'error');
 
   try {
+    const buildBody = (extra) => {
+      const body = { nombre, telefono, cedula, estado_pago: estadoPago, ...extra };
+      if (estadoPago === 'pagado') { body.metodo_pago = metodoPago; body.observacion = observacion || null; }
+      return body;
+    };
     if (s.esCuatro) {
       for (const gi of s.seleccion) {
         await api('/rifas/' + s.rifaId + '/participantes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre, telefono, cedula, grupo_idx: gi })
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildBody({ grupo_idx: gi }))
         });
         if (s.grupos[gi]) s.grupos[gi].estado = 'vendida';
       }
@@ -2677,9 +2735,8 @@ async function _registrarDesdeSeleccion() {
     } else if (s.chance) {
       for (const b of s.seleccion) {
         await api('/rifas/' + s.rifaId + '/participantes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre, telefono, cedula, numero: b.numero, simbolo: b.simbolo })
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildBody({ numero: b.numero, simbolo: b.simbolo }))
         });
         const idx = s.boletas.findIndex(bb => bb.numero === b.numero && bb.simbolo === b.simbolo);
         if (idx >= 0) s.boletas[idx].estado = 'vendido';
@@ -2688,9 +2745,8 @@ async function _registrarDesdeSeleccion() {
     } else {
       for (const num of s.seleccion) {
         await api('/rifas/' + s.rifaId + '/participantes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre, telefono, cedula, numero: num })
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildBody({ numero: num }))
         });
         const idx = s.numeros.findIndex(n => n.numero === num);
         if (idx >= 0) s.numeros[idx].estado = 'vendido';
@@ -2699,10 +2755,8 @@ async function _registrarDesdeSeleccion() {
     }
     const count = s.seleccion.length;
     s.seleccion = [];
-    document.getElementById('sel-nombre').value = '';
-    document.getElementById('sel-telefono').value = '';
-    document.getElementById('sel-cedula').value = '';
-    toast(`✅ ${count} ${s.esCuatro ? 'grupo(s)' : 'boleta(s)'} registrado(s) para "${nombre}"`);
+    const labelPago = estadoPago === 'pagado' ? ' (pagado)' : '';
+    toast(`✅ ${count} ${s.esCuatro ? 'grupo(s)' : 'boleta(s)'} registrado(s) para "${nombre}"${labelPago}`);
     _renderModalSeleccion();
   } catch (err) {
     toast('Error: ' + err.message, 'error');
