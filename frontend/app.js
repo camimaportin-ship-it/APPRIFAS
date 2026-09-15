@@ -2288,9 +2288,14 @@ async function modalRegistroMasivoSeleccion(rifaId) {
   try {
     const datos = await api('/rifas/' + rifaId + '/numeros');
     const rifa = await api('/rifas/' + rifaId);
+    const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
+    const chance = modoEsChance(rifa);
     state._seleccionNumeros = {
       rifaId, rifa,
+      esCuatro, chance,
       numeros: Array.isArray(datos) ? datos : (datos.numeros || []),
+      grupos: esCuatro ? (datos.grupos || []) : [],
+      boletas: chance ? (datos.boletas || []) : [],
       seleccion: [],
       registrados: 0
     };
@@ -2304,44 +2309,54 @@ async function modalRegistroMasivoSeleccion(rifaId) {
 function _renderModalSeleccion() {
   const s = state._seleccionNumeros;
   if (!s) return;
-  const libres = s.numeros.filter(n => n.estado === 'libre');
+  const { esCuatro, chance } = s;
+  const libres = esCuatro
+    ? s.grupos.filter(g => g.estado === 'libre')
+    : chance
+      ? s.boletas.filter(b => b.estado === 'libre')
+      : s.numeros.filter(n => n.estado === 'libre');
   const seleccionados = s.seleccion;
+  const totalSel = esCuatro
+    ? seleccionados.reduce((sum, gi) => sum + (s.grupos[gi]?.numeros?.length || 0), 0)
+    : seleccionados.length;
+
+  const etiquetaItem = esCuatro ? 'grupo' : chance ? 'boleta' : 'número';
+  const etiquetaItems = esCuatro ? 'grupos' : chance ? 'boletas' : 'números';
 
   const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div style="position:fixed; inset:0; z-index:90; background:rgba(5,10,25,0.7); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:16px;">
-      <div style="width:100%; max-width:700px; max-height:90vh; background:#16213F; border:1px solid #22315A; border-radius:18px; display:flex; flex-direction:column; overflow:hidden;">
+      <div style="width:100%; max-width:780px; max-height:90vh; background:#16213F; border:1px solid #22315A; border-radius:18px; display:flex; flex-direction:column; overflow:hidden;">
         <div style="padding:20px 24px 12px; border-bottom:1px solid var(--line);">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h3 style="margin:0;">🔢 Seleccionar números — ${escapeHtml(s.rifa.nombre)}</h3>
+            <h3 style="margin:0;">🔢 Seleccionar ${etiquetaItems} — ${escapeHtml(s.rifa.nombre)}</h3>
             <button class="btn btn-ghost btn-sm" onclick="state._seleccionNumeros=null; cerrarModal();">✕</button>
           </div>
-          <p class="text-sm text-ink-600" style="margin:4px 0 0;">${libres.length} números disponibles · ${seleccionados.length} seleccionados · ${s.registrados} registrados</p>
+          <p class="text-sm text-ink-600" style="margin:4px 0 0;">${libres.length} ${etiquetaItems} disponibles · ${totalSel} seleccionados · ${s.registrados} registrados</p>
         </div>
 
         <div style="display:flex; flex:1; overflow:hidden;">
-          <!-- Panel izquierdo: grilla de números -->
           <div style="flex:1; overflow-y:auto; padding:16px; border-right:1px solid var(--line);">
-            <div style="display:flex; flex-wrap:wrap; gap:6px;">
-              ${libres.map(n => {
-                const sel = seleccionados.includes(n.numero);
-                return `<button type="button" onclick="_toggleNumSeleccion(${n.numero})"
-                  style="width:44px; height:36px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'};">
-                  ${fmtNum(s.rifa, n.numero)}
-                </button>`;
-              }).join('')}
-              ${libres.length === 0 ? '<p class="text-sm text-ink-600">No hay números disponibles</p>' : ''}
-            </div>
+            ${esCuatro ? _renderGruposSeleccion(libres, seleccionados, s)
+              : chance ? _renderBoletasSeleccion(libres, seleccionados, s)
+              : _renderNumerosSeleccion(libres, seleccionados, s)}
           </div>
 
-          <!-- Panel derecho: formulario + números seleccionados -->
           <div style="width:280px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px;">
             <div>
-              <p style="font-weight:600; font-size:13px; margin:0 0 8px;">Números seleccionados</p>
+              <p style="font-weight:600; font-size:13px; margin:0 0 8px;">${esCuatro ? 'Grupos' : chance ? 'Boletas' : 'Números'} seleccionados</p>
               <div style="display:flex; flex-wrap:wrap; gap:4px; min-height:32px;">
                 ${seleccionados.length === 0
-                  ? '<span class="text-xs text-ink-600">Haz clic en un número para seleccionarlo</span>'
-                  : seleccionados.map(n => `<span style="padding:4px 8px; background:rgba(212,160,23,0.2); border:1px solid #D4A017; border-radius:6px; font-size:12px; font-weight:600; color:#F2C14E;">${fmtNum(s.rifa, n)}</span>`).join('')
+                  ? `<span class="text-xs text-ink-600">Haz clic en un ${etiquetaItem} para seleccionarlo</span>`
+                  : esCuatro
+                    ? seleccionados.map(gi => {
+                        const g = s.grupos[gi];
+                        return `<span style="padding:4px 8px; background:rgba(212,160,23,0.2); border:1px solid #D4A017; border-radius:6px; font-size:11px; font-weight:600; color:#F2C14E; white-space:nowrap;">[${(g.numeros || []).join(', ')}]</span>`;
+                      }).join('')
+                    : seleccionados.map(item => {
+                        const display = chance ? (item.label || fmtNum(s.rifa, item.numero)) : fmtNum(s.rifa, item);
+                        return `<span style="padding:4px 8px; background:rgba(212,160,23,0.2); border:1px solid #D4A017; border-radius:6px; font-size:12px; font-weight:600; color:#F2C14E; white-space:nowrap;">${display}</span>`;
+                      }).join('')
                 }
               </div>
             </div>
@@ -2362,7 +2377,7 @@ function _renderModalSeleccion() {
               </div>
               <button class="btn btn-gold btn-sm" style="width:100%;" onclick="_registrarDesdeSeleccion()"
                 ${seleccionados.length === 0 ? 'disabled style="width:100%; opacity:0.5;"' : ''}>
-                Registrar participante (${seleccionados.length} número${seleccionados.length !== 1 ? 's' : ''})
+                Registrar participante (${totalSel} número${totalSel !== 1 ? 's' : ''})
               </button>
             </div>
 
@@ -2375,12 +2390,74 @@ function _renderModalSeleccion() {
     </div>`;
 }
 
+function _renderNumerosSeleccion(libres, seleccionados, s) {
+  if (libres.length === 0) return '<p class="text-sm text-ink-600">No hay números disponibles</p>';
+  return `<div style="display:flex; flex-wrap:wrap; gap:6px;">
+    ${libres.map(n => {
+      const sel = seleccionados.includes(n.numero);
+      return `<button type="button" onclick="_toggleNumSeleccion(${n.numero})"
+        style="width:44px; height:36px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'};">
+        ${fmtNum(s.rifa, n.numero)}
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
+function _renderBoletasSeleccion(libres, seleccionados, s) {
+  if (libres.length === 0) return '<p class="text-sm text-ink-600">No hay boletas disponibles</p>';
+  return `<div style="display:flex; flex-wrap:wrap; gap:6px;">
+    ${libres.map(b => {
+      const sel = seleccionados.some(s => s.numero === b.numero && s.simbolo === b.simbolo);
+      return `<button type="button" onclick="_toggleBoletaSeleccion(${JSON.stringify(b.numero).replace(/"/g, '&quot;')}, '${b.simbolo}')"
+        style="width:72px; height:40px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'}; display:flex; align-items:center; justify-content:center; gap:3px;">
+        ${b.label || (fmtNum(s.rifa, b.numero) + ' ' + b.simbolo)}
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
+function _renderGruposSeleccion(libres, seleccionados, s) {
+  if (libres.length === 0) return '<p class="text-sm text-ink-600">No hay grupos disponibles</p>';
+  return `<div style="display:flex; flex-wrap:wrap; gap:6px;">
+    ${libres.map(g => {
+      const gi = s.grupos.indexOf(g);
+      const sel = seleccionados.includes(gi);
+      const nums = (g.numeros || []).map(num => fmtNum(s.rifa, num)).join(' ');
+      return `<button type="button" onclick="_toggleGrupoSeleccion(${gi})"
+        style="width:140px; height:44px; border-radius:10px; font-size:12px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'}; display:flex; align-items:center; justify-content:center; gap:4px; letter-spacing:0.5px;">
+        ${nums}
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
 function _toggleNumSeleccion(numero) {
   const s = state._seleccionNumeros;
   if (!s) return;
   const idx = s.seleccion.indexOf(numero);
   if (idx >= 0) s.seleccion.splice(idx, 1);
   else s.seleccion.push(numero);
+  _renderModalSeleccion();
+}
+
+function _toggleBoletaSeleccion(numero, simbolo) {
+  const s = state._seleccionNumeros;
+  if (!s) return;
+  const idx = s.seleccion.findIndex(b => b.numero === numero && b.simbolo === simbolo);
+  if (idx >= 0) s.seleccion.splice(idx, 1);
+  else {
+    const boleta = s.boletas.find(b => b.numero === numero && b.simbolo === simbolo);
+    if (boleta) s.seleccion.push(boleta);
+  }
+  _renderModalSeleccion();
+}
+
+function _toggleGrupoSeleccion(grupoIdx) {
+  const s = state._seleccionNumeros;
+  if (!s) return;
+  const idx = s.seleccion.indexOf(grupoIdx);
+  if (idx >= 0) s.seleccion.splice(idx, 1);
+  else s.seleccion.push(grupoIdx);
   _renderModalSeleccion();
 }
 
@@ -2393,22 +2470,46 @@ async function _registrarDesdeSeleccion() {
   const cedula = (document.getElementById('sel-cedula')?.value || '').trim();
 
   try {
-    for (const num of s.seleccion) {
-      await api('/rifas/' + s.rifaId + '/participantes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, telefono, cedula, numero: num })
-      });
-      const idx = s.numeros.findIndex(n => n.numero === num);
-      if (idx >= 0) s.numeros[idx].estado = 'vendido';
+    if (s.esCuatro) {
+      for (const gi of s.seleccion) {
+        await api('/rifas/' + s.rifaId + '/participantes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, telefono, cedula, grupo_idx: gi })
+        });
+        if (s.grupos[gi]) s.grupos[gi].estado = 'vendida';
+      }
+      const count = s.seleccion.reduce((sum, gi) => sum + (s.grupos[gi]?.numeros?.length || 0), 0);
+      s.registrados += count;
+    } else if (s.chance) {
+      for (const b of s.seleccion) {
+        await api('/rifas/' + s.rifaId + '/participantes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, telefono, cedula, numero: b.numero, simbolo: b.simbolo })
+        });
+        const idx = s.boletas.findIndex(bb => bb.numero === b.numero && bb.simbolo === b.simbolo);
+        if (idx >= 0) s.boletas[idx].estado = 'vendido';
+      }
+      s.registrados += s.seleccion.length;
+    } else {
+      for (const num of s.seleccion) {
+        await api('/rifas/' + s.rifaId + '/participantes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, telefono, cedula, numero: num })
+        });
+        const idx = s.numeros.findIndex(n => n.numero === num);
+        if (idx >= 0) s.numeros[idx].estado = 'vendido';
+      }
+      s.registrados += s.seleccion.length;
     }
-    s.registrados += s.seleccion.length;
     const count = s.seleccion.length;
     s.seleccion = [];
     document.getElementById('sel-nombre').value = '';
     document.getElementById('sel-telefono').value = '';
     document.getElementById('sel-cedula').value = '';
-    toast(`✅ ${count} participante(s) registrado(s)`);
+    toast(`✅ ${count} ${s.esCuatro ? 'grupo(s)' : 'boleta(s)'} registrado(s) para "${nombre}"`);
     _renderModalSeleccion();
   } catch (err) {
     toast('Error: ' + err.message, 'error');
