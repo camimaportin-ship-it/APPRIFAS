@@ -1575,103 +1575,111 @@ async function exportarMapaNumeros(rifaId, modo) {
     if (esChance) {
       items = boletas.map(b => ({ numero: b.numero, label: b.label, estado: b.estado }));
     } else {
-      items = numeros.map(x => ({ numero: x.numero, label: String(x.numero), estado: x.estado }));
+      items = numeros.map(x => ({ numero: x.numero, label: String(x.numero).padStart(2, '0'), estado: x.estado }));
     }
+    items.sort((a, b) => a.numero - b.numero);
 
     const filtrados = modo === 'disponibles' ? items.filter(x => x.estado === 'libre') : items;
     if (!filtrados.length) { toast(modo === 'disponibles' ? 'No hay números disponibles' : 'No hay números', 'error'); return; }
 
     const COLS = 10;
-    const CELL_SIZE = 56, PAD = 6;
-    const HEADER_H = 70, LEGEND_H = 36, FOOTER_H = 36;
-    const totalItems = modo === 'disponibles' ? filtrados.length : items.length;
-    const rows = Math.ceil(totalItems / COLS);
-    const W = COLS * (CELL_SIZE + PAD) + PAD;
-    const H = HEADER_H + rows * (CELL_SIZE + PAD) + PAD + LEGEND_H + FOOTER_H;
+    const CELL = 54, GAP = 5, MARGIN = 28;
+    const HEADER_H = 95, LEGEND_H = 32, FOOTER_H = 40;
+    const displayItems = modo === 'disponibles' ? filtrados : items;
+    const rows = Math.ceil(displayItems.length / COLS);
+    const W = MARGIN * 2 + COLS * (CELL + GAP) - GAP;
+    const H = HEADER_H + rows * (CELL + GAP) + GAP + LEGEND_H + FOOTER_H;
 
     const c = document.createElement('canvas');
     c.width = W * 2; c.height = H * 2;
     const ctx = c.getContext('2d');
     ctx.scale(2, 2);
 
-    ctx.fillStyle = '#F5F6F9';
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0B1229');
+    grad.addColorStop(1, '#151B36');
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // Header
-    ctx.fillStyle = '#0B1229';
-    ctx.font = 'bold 15px Sora, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(modo === 'disponibles'
-      ? `Números disponibles — ${filtrados.length} libres`
-      : `Mapa de números`, PAD, 28);
-    ctx.font = '11px Sora, sans-serif';
-    ctx.fillStyle = '#6B7280';
-    ctx.fillText(`${rifa.nombre} · ${new Date().toLocaleDateString('es-CO')}`, PAD, 48);
+    ctx.fillStyle = '#D4A017';
+    ctx.fillRect(MARGIN, 12, W - MARGIN * 2, 3);
 
-    // Leyenda
-    const ly = HEADER_H - 10;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px Sora, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(modo === 'disponibles' ? `Numeros Disponibles` : `Mapa de Numeros`, MARGIN, 38);
+
+    ctx.fillStyle = '#D4A017';
+    ctx.font = 'bold 14px Sora, sans-serif';
+    const subtitulo = modo === 'disponibles'
+      ? `${filtrados.length} de ${items.length} libres`
+      : `${items.length} numeros en total`;
+    ctx.fillText(subtitulo, MARGIN, 56);
+
+    ctx.fillStyle = '#8B94B3';
+    ctx.font = '12px Sora, sans-serif';
+    ctx.fillText(rifa.nombre + '  ·  ' + new Date().toLocaleDateString('es-CO'), MARGIN, 74);
+
+    const ly = HEADER_H - 5;
     const legendItems = modo === 'disponibles'
       ? [{ color: '#22c55e', label: 'Disponible' }]
       : [
-          { color: '#22c55e', label: 'Disponible' },
-          { color: '#f97316', label: 'Pendiente' },
+          { color: '#22c55e', label: 'Libre' },
+          { color: '#f59e0b', label: 'Pendiente' },
           { color: '#3b82f6', label: 'Pagado' }
         ];
-    let lx = PAD;
+    let lx = MARGIN;
     legendItems.forEach(item => {
       ctx.fillStyle = item.color;
-      ctx.beginPath(); ctx.arc(lx + 6, ly + 6, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#374151';
+      ctx.beginPath(); ctx.arc(lx + 5, ly + 5, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#8B94B3';
       ctx.font = '10px Sora, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(item.label, lx + 16, ly + 10);
-      lx += ctx.measureText(item.label).width + 30;
+      ctx.fillText(item.label, lx + 14, ly + 8);
+      lx += ctx.measureText(item.label).width + 26;
     });
 
-    // Celdas
-    const colores = { libre: '#22c55e', pendiente: '#f97316', pagado: '#3b82f6' };
+    const coloresBg = { libre: '#1E2748', pendiente: '#5C3D0B', pagado: '#1B3A6B' };
+    const coloresBorder = { libre: '#22c55e', pendiente: '#f59e0b', pagado: '#3b82f6' };
+    const coloresTxt = { libre: '#4ADE80', pendiente: '#FCD34D', pagado: '#60A5FA' };
+
     if (modo === 'disponibles') {
       filtrados.forEach((num, i) => {
         const col = i % COLS;
         const row = Math.floor(i / COLS);
-        const x = PAD + col * (CELL_SIZE + PAD);
-        const y = HEADER_H + row * (CELL_SIZE + PAD);
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#22c55e';
+        const x = MARGIN + col * (CELL + GAP);
+        const y = HEADER_H + row * (CELL + GAP);
+        ctx.fillStyle = coloresBg.libre;
+        ctx.strokeStyle = coloresBorder.libre;
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(x, y, CELL_SIZE, CELL_SIZE, 8); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#0B1229';
-        ctx.font = 'bold 16px monospace';
+        ctx.beginPath(); ctx.roundRect(x, y, CELL, CELL, 8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = coloresTxt.libre;
+        ctx.font = 'bold 15px JetBrains Mono, monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(num.label, x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 5);
+        ctx.fillText(num.label, x + CELL / 2, y + CELL / 2 + 5);
       });
     } else {
-      const byNum = {};
-      items.forEach(x => { byNum[x.numero] = x; });
-      for (let i = 0; i < items.length; i++) {
+      displayItems.forEach((num, i) => {
         const col = i % COLS;
         const row = Math.floor(i / COLS);
-        const x = PAD + col * (CELL_SIZE + PAD);
-        const y = HEADER_H + row * (CELL_SIZE + PAD);
-        const num = items[i];
-        const bg = num.estado === 'pagado' ? '#3b82f6' : num.estado === 'pendiente' ? '#f97316' : '#fff';
-        const fg = (num.estado === 'pagado' || num.estado === 'pendiente') ? '#fff' : '#0B1229';
-        ctx.fillStyle = bg;
-        ctx.strokeStyle = colores[num.estado] || '#D1D5DB';
+        const x = MARGIN + col * (CELL + GAP);
+        const y = HEADER_H + row * (CELL + GAP);
+        const est = num.estado || 'libre';
+        ctx.fillStyle = coloresBg[est] || coloresBg.libre;
+        ctx.strokeStyle = coloresBorder[est] || '#2E3A5E';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(x, y, CELL_SIZE, CELL_SIZE, 8); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = fg;
-        ctx.font = 'bold 15px monospace';
+        ctx.beginPath(); ctx.roundRect(x, y, CELL, CELL, 8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = coloresTxt[est] || '#CBD5E1';
+        ctx.font = 'bold 15px JetBrains Mono, monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(num.label || String(num.numero), x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 5);
-      }
+        ctx.fillText(num.label || String(num.numero).padStart(2, '0'), x + CELL / 2, y + CELL / 2 + 5);
+      });
     }
 
-    // Footer
-    ctx.fillStyle = '#9CA3AF';
+    ctx.fillStyle = '#4B5580';
     ctx.font = '9px Sora, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Rifas SYC', W / 2, H - 12);
+    ctx.fillText('Rifas SYC  ·  rifassyc.local', W / 2, H - 14);
 
     c.toBlob(blob => {
       const url = URL.createObjectURL(blob);
@@ -1685,7 +1693,6 @@ async function exportarMapaNumeros(rifaId, modo) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-// Exporta imagen PNG del mapa de grupos (disponibles o todos)
 async function exportarGruposImagen(rifaId, modo) {
   try {
     const rifa = await api('/rifas/' + rifaId);
@@ -1695,100 +1702,128 @@ async function exportarGruposImagen(rifaId, modo) {
     const filtrados = modo === 'disponibles' ? grupos.filter(g => g.estado === 'libre') : grupos;
     if (!filtrados.length) { toast(modo === 'disponibles' ? 'No hay grupos disponibles' : 'No hay grupos', 'error'); return; }
 
-    const COLS = 10;
-    const CELL_W = 90, CELL_H = 70, PAD = 8;
-    const HEADER_H = 80, FOOTER_H = 50, LEGEND_H = 40;
+    filtrados.forEach(g => { if (Array.isArray(g.numeros)) g.numeros.sort((a, b) => a - b); });
+    filtrados.sort((a, b) => {
+      const aFirst = Array.isArray(a.numeros) ? a.numeros[0] : 0;
+      const bFirst = Array.isArray(b.numeros) ? b.numeros[0] : 0;
+      return aFirst - bFirst;
+    });
+
+    const COLS = 7;
+    const CELL_W = 118, CELL_H = 88, GAP = 6, MARGIN = 28;
+    const HEADER_H = 95, LEGEND_H = 32, FOOTER_H = 40;
     const rows = Math.ceil(filtrados.length / COLS);
-    const W = COLS * (CELL_W + PAD) + PAD;
-    const H = HEADER_H + rows * (CELL_H + PAD) + PAD + LEGEND_H + FOOTER_H;
+    const W = MARGIN * 2 + COLS * (CELL_W + GAP) - GAP;
+    const H = HEADER_H + rows * (CELL_H + GAP) + GAP + LEGEND_H + FOOTER_H;
 
     const c = document.createElement('canvas');
     c.width = W * 2; c.height = H * 2;
     const ctx = c.getContext('2d');
     ctx.scale(2, 2);
 
-    // Fondo
-    ctx.fillStyle = '#F5F6F9';
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0B1229');
+    grad.addColorStop(1, '#151B36');
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // Header
-    ctx.fillStyle = '#0B1229';
-    ctx.font = 'bold 16px Sora, sans-serif';
+    ctx.fillStyle = '#D4A017';
+    ctx.fillRect(MARGIN, 12, W - MARGIN * 2, 3);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px Sora, sans-serif';
     ctx.textAlign = 'left';
-    const titulo = modo === 'disponibles'
-      ? `Grupos de ${n} oportunidades — ${filtrados.length} disponibles`
-      : `Mapa de grupos — ${n} oportunidades`;
-    ctx.fillText(titulo, PAD, 30);
+    ctx.fillText(modo === 'disponibles' ? `Grupos Disponibles` : `Mapa de Grupos`, MARGIN, 38);
 
-    ctx.font = '11px Sora, sans-serif';
-    ctx.fillStyle = '#6B7280';
-    ctx.fillText(`${rifa.nombre} · ${new Date().toLocaleDateString('es-CO')}`, PAD, 50);
+    ctx.fillStyle = '#D4A017';
+    ctx.font = 'bold 14px Sora, sans-serif';
+    const sub = modo === 'disponibles'
+      ? `${filtrados.length} grupos de ${n} oportunidades`
+      : `${filtrados.length} grupos · ${n} oportunidades`;
+    ctx.fillText(sub, MARGIN, 56);
 
-    // Leyenda
-    const ly = HEADER_H - 12;
+    ctx.fillStyle = '#8B94B3';
+    ctx.font = '12px Sora, sans-serif';
+    ctx.fillText(rifa.nombre + '  ·  ' + new Date().toLocaleDateString('es-CO'), MARGIN, 74);
+
+    const ly = HEADER_H - 5;
     const legendItems = modo === 'disponibles'
       ? [{ color: '#22c55e', label: 'Disponible' }]
       : [
-          { color: '#22c55e', label: 'Disponible' },
-          { color: '#f97316', label: 'Pendiente' },
-          { color: '#3b82f6', label: 'Pagado' },
-          { color: '#ef4444', label: 'Vendido' }
+          { color: '#22c55e', label: 'Libre' },
+          { color: '#f59e0b', label: 'Pendiente' },
+          { color: '#3b82f6', label: 'Pagado' }
         ];
-    let lx = PAD;
+    let lx = MARGIN;
     legendItems.forEach(item => {
       ctx.fillStyle = item.color;
-      ctx.fillRect(lx, ly, 12, 12);
-      ctx.fillStyle = '#374151';
+      ctx.beginPath(); ctx.arc(lx + 5, ly + 5, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#8B94B3';
       ctx.font = '10px Sora, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(item.label, lx + 16, ly + 10);
-      lx += ctx.measureText(item.label).width + 30;
+      ctx.fillText(item.label, lx + 14, ly + 8);
+      lx += ctx.measureText(item.label).width + 26;
     });
 
-    // Celdas
-    const colores = { libre: '#22c55e', pendiente: '#f97316', pagado: '#3b82f6', vendida: '#ef4444' };
-    const textos = { libre: 'disponible', pendiente: 'pendiente', pagado: 'pagado', vendida: 'vendido' };
+    const coloresBg = { libre: '#1E2748', pendiente: '#5C3D0B', pagado: '#1B3A6B' };
+    const coloresBorder = { libre: '#22c55e', pendiente: '#f59e0b', pagado: '#3b82f6' };
+    const coloresNum = { libre: '#4ADE80', pendiente: '#FCD34D', pagado: '#60A5FA' };
+    const labelEstado = { libre: 'Libre', pendiente: 'Pendiente', pagado: 'Pagado' };
+
     filtrados.forEach((g, i) => {
       const col = i % COLS;
       const row = Math.floor(i / COLS);
-      const x = PAD + col * (CELL_W + PAD);
-      const y = HEADER_H + row * (CELL_H + PAD);
+      const x = MARGIN + col * (CELL_W + GAP);
+      const y = HEADER_H + row * (CELL_H + GAP);
+      const est = g.estado || 'libre';
 
-      // Tarjeta
-      const bg = g.estado === 'pagado' ? '#3b82f6' : g.estado === 'pendiente' ? '#f97316' : '#fff';
-      const fg = (g.estado === 'pagado' || g.estado === 'pendiente') ? '#fff' : '#0B1229';
-      const fgEstado = g.estado === 'libre' ? colores.libre : '#fff';
-      ctx.fillStyle = bg;
-      ctx.strokeStyle = colores[g.estado] || '#D1D5DB';
-      ctx.lineWidth = 2;
+      ctx.fillStyle = coloresBg[est] || coloresBg.libre;
+      ctx.strokeStyle = coloresBorder[est] || '#2E3A5E';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.roundRect(x, y, CELL_W, CELL_H, 8);
+      ctx.roundRect(x, y, CELL_W, CELL_H, 10);
       ctx.fill();
       ctx.stroke();
 
-      // Números
-      ctx.fillStyle = fg;
-      ctx.font = 'bold 14px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(g.numeros.join('  '), x + CELL_W / 2, y + 28);
+      const nums = Array.isArray(g.numeros) ? g.numeros : [];
+      const numCols = n <= 4 ? 2 : 3;
+      const numRows = Math.ceil(nums.length / numCols);
+      const miniW = 36, miniH = 22, miniGap = 3;
+      const gridW = numCols * miniW + (numCols - 1) * miniGap;
+      const gridH = numRows * miniH + (numRows - 1) * miniGap;
+      const startX = x + (CELL_W - gridW) / 2;
+      const startY = y + 6;
 
-      // Estado
-      ctx.fillStyle = fgEstado;
+      nums.forEach((num, ni) => {
+        const mc = ni % numCols;
+        const mr = Math.floor(ni / numCols);
+        const mx = startX + mc * (miniW + miniGap);
+        const my = startY + mr * (miniH + miniGap);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.beginPath();
+        ctx.roundRect(mx, my, miniW, miniH, 4);
+        ctx.fill();
+        ctx.fillStyle = coloresNum[est] || '#CBD5E1';
+        ctx.font = 'bold 11px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(num).padStart(2, '0'), mx + miniW / 2, my + miniH / 2 + 4);
+      });
+
+      const labelY = y + CELL_H - 14;
+      ctx.fillStyle = coloresNum[est] || '#CBD5E1';
       ctx.beginPath();
-      ctx.arc(x + 12, y + 50, 5, 0, Math.PI * 2);
+      ctx.arc(x + 14, labelY - 2, 3.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.font = '10px Sora, sans-serif';
+      ctx.font = '9px Sora, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(textos[g.estado] || g.estado, x + 20, y + 54);
+      ctx.fillText(labelEstado[est] || est, x + 22, labelY);
     });
 
-    // Footer
-    ctx.fillStyle = '#9CA3AF';
+    ctx.fillStyle = '#4B5580';
     ctx.font = '9px Sora, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Rifas SYC — rifassyc.local', W / 2, H - 15);
+    ctx.fillText('Rifas SYC  ·  rifassyc.local', W / 2, H - 14);
 
-    // Descargar
     c.toBlob(blob => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
