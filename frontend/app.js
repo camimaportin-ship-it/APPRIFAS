@@ -3225,7 +3225,7 @@ async function renderSorteoTab(rifa, box) {
             </select>
           </div>
         </div>
-        <p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado, y <strong>todos los nombres se muestran en la ruleta</strong> (se ajusta sola al tamaño necesario para que nadie quede fuera). Las primeras vueltas son <strong>demostraciones</strong>: cada una revela a su "ganador del momento" con el mensaje <strong>RULETA X DE N</strong>, y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido de la ruleta)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
+        <p class="text-sm text-ink-600">Formato <strong>híbrido automático</strong>: con pocos participantes usa la <strong>ruleta circular</strong>; con muchos cambia a un <strong>tambor/gigantón</strong> donde <strong>TODOS los nombres se ven en filas gigantes</strong> y legibles sin importar la cantidad. Además, el <strong>banner lateral</strong> muestra en vivo (a alta velocidad) el nombre que está bajo la aguja. Las vueltas previas son <strong>demostraciones</strong> (RULETA X DE N) y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
         <label class="check-row mt-2"><input type="checkbox" id="ruleta-manual" checked> <span>⏸️ <strong>Pausar entre giros:</strong> yo elijo el momento del siguiente giro para dar pausa y explicar cada resultado</span></label>`;
     }
   };
@@ -3260,26 +3260,40 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
         if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return String(n).padStart(4, '0');
         return String(n).padStart(2, '0');
       };
-      const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span class="mono">#${etiquetar(p.numero)}</span><span>${escapeHtml(p.nombre || '')}</span></li>`).join('');
+const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span class="mono">#${etiquetar(p.numero)}</span><span>${escapeHtml(p.nombre || '')}</span></li>`).join('');
+      const tituloGiros = vueltas > 1 ? `${vueltas} giros · demos primero` : 'Sorteo en vivo';
       area.innerHTML = `
         <div class="card card-pad">
           <div class="flex justify-between items-center mb-2" style="flex-wrap:wrap; gap:8px;">
-            <h4 style="margin:0;">🎡 ${vueltas > 1 ? `${vueltas} giros · demos primero` : 'Sorteo en vivo'}</h4>
+            <h4 style="margin:0;">🎡 ${tituloGiros}</h4>
             <button class="btn btn-outline btn-sm" id="btn-ruleta-fullscreen" type="button">⛶ Pantalla completa</button>
           </div>
           <div class="anim-layout">
             <div class="anim-canvas text-center">
               <canvas id="canvas-ruleta" width="${tamano}" height="${tamano}" style="max-width:100%;"></canvas>
-              <p class="text-sm text-ink-600 mt-2" id="ruleta-estado">Girando y grabando evidencia...</p>
+              <p class="text-sm text-ink-600 mt-2" id="ruleta-estado">Preparando el sorteo...</p>
             </div>
-            <div class="anim-lista">
-              <h4>Participantes (${pagados.length})</h4>
-              <ol class="anim-lista-ol">${filas}</ol>
+            <div class="anim-lado">
+              <div class="ruleta-banner" id="ruleta-banner">
+                <div class="lbl">Participante actual</div>
+                <div class="numero" id="ruleta-banner-num">#—</div>
+                <div class="nombre" id="ruleta-banner-name">—</div>
+              </div>
+              <div class="anim-lista">
+                <h4>Participantes (${pagados.length})</h4>
+                <ol class="anim-lista-ol">${filas}</ol>
+              </div>
             </div>
           </div>
         </div>`;
+      const elBannerNum = document.getElementById('ruleta-banner-num');
+      const elBannerName = document.getElementById('ruleta-banner-name');
       const rueda = new RuletaCanvas(document.getElementById('canvas-ruleta'), pagados.map(p => ({ numero: p.numero, nombre: p.nombre, label: etiquetar(p.numero) })), {
         onEstado: (txt) => { const el = document.getElementById('ruleta-estado'); if (el) el.textContent = txt; },
+        onBanner: (idx, p) => {
+          if (elBannerNum) elBannerNum.textContent = '#' + (p && (p.label != null ? p.label : p.numero));
+          if (elBannerName) elBannerName.textContent = (p && p.nombre) || '—';
+        },
         onMomento: (p, idx, total, definitiva) => {
           document.querySelectorAll('#area-sorteo .ruleta-demo').forEach(el => el.classList.remove('ruleta-demo'));
           const li = document.querySelector(`#area-sorteo [data-numero="${etiquetar(p.numero)}"]`);
@@ -3290,8 +3304,11 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
           if (fg) { fg.classList.remove('ruleta-demo'); fg.classList.add('ganador'); }
         }
       });
-      const tamFinal = Math.max(tamano, Math.min(rueda.tamanoRecomendado(), Math.floor(window.innerWidth - 40)));
-      rueda.cambiarTamano(tamFinal, tamFinal);
+      const rec = rueda.tamanoRecomendado();
+      const dispW = Math.max(320, Math.min(rec.w, Math.floor(window.innerWidth - 40)));
+      const dispH = Math.max(240, Math.round(rec.h * (dispW / rec.w)));
+      rueda.cambiarTamano(dispW, dispH);
+      const tamRec = { w: dispW, h: dispH, asp: dispH / dispW };
       const resultado = await api('/rifas/' + rifa.id + '/sortear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const manualChk = document.getElementById('ruleta-manual');
       const manual = !manualChk || manualChk.checked;
@@ -3310,34 +3327,40 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
         btn.addEventListener('click', () => { btn.remove(); resolve(); });
       });
 
-      // Pantalla completa: mueve el mismo canvas a un overlay para maximizarlo
+      // Pantalla completa: mueve el mismo canvas (y el banner) a un overlay para maximizarlos
       const btnFs = document.getElementById('btn-ruleta-fullscreen');
       if (btnFs) btnFs.addEventListener('click', () => {
         const canvas = document.getElementById('canvas-ruleta');
         const contenedor = canvas.closest('.anim-canvas');
+        const banner = document.getElementById('ruleta-banner');
+        const contBanner = banner ? banner.parentNode : null;
         const ov = document.createElement('div');
-        ov.style.cssText = 'position:fixed;inset:0;background:#0B1229;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2400;';
-        ov.innerHTML = `<p style="color:#E8B923;font-weight:700;margin:0 0 6px;">🎡 Sorteo en pantalla completa</p>`;
+        ov.style.cssText = 'position:fixed;inset:0;background:#0B1229;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2400;padding:14px;';
+        ov.innerHTML = `<p style="color:#E8B923;font-weight:700;margin:0 0 8px;text-align:center;">🎡 Sorteo en pantalla completa</p>`;
         const span = document.createElement('span');
+        span.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;';
         ov.appendChild(span);
+        if (banner) span.appendChild(banner);
         span.appendChild(canvas);
         canvas.style.maxWidth = '94vw';
         canvas.style.height = 'auto';
         const btnSalir = document.createElement('button');
         btnSalir.className = 'btn btn-gold';
-        btnSalir.style.marginTop = '10px';
+        btnSalir.style.marginTop = '12px';
         btnSalir.textContent = '✕ Salir de pantalla completa';
         btnSalir.addEventListener('click', () => {
           ov.remove();
+          if (banner && contBanner) { banner.remove(); contBanner.appendChild(banner); }
           contenedor.appendChild(canvas);
           canvas.style.maxWidth = '';
           canvas.style.height = '';
-          rueda.cambiarTamano(tamFinal, tamFinal);
+          rueda.cambiarTamano(tamRec.w, tamRec.h);
         });
         ov.appendChild(btnSalir);
         document.body.appendChild(ov);
-        const nuevoTam = Math.min(window.innerWidth - 60, window.innerHeight - 120, 1200);
-        rueda.cambiarTamano(nuevoTam, nuevoTam);
+        const nw = Math.min(window.innerWidth - 48, 1400);
+        const nh = Math.round(nw * tamRec.asp);
+        rueda.cambiarTamano(nw, nh);
       });
 
       const videoUrl = await rueda.girarMultiples(resultado.ganadores[0].numero, { vueltas, duracionMs: duracionSeg * 1000, manual, onEsperaContinuar });

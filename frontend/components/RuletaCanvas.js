@@ -1,20 +1,28 @@
 /**
  * RuletaCanvas.js
  * -----------------------------------------------------------------------------
- * Ruleta de sorteo dibujada en <canvas>. TRANSPARENCIA: el GANADOR real siempre
+ * Sorteo visual con evidencia en video. TRANSPARENCIA: el GANADOR real siempre
  * lo determina el backend (server.js) con la "semilla aleatoria" guardada en la
- * tabla `ganadores`. Esta ruleta es la capa VISUAL: recibe el número ganador ya
- * decidido y aterriza exactamente ahí, grabando un video de evidencia honesto.
+ * tabla `ganadores`. Esta vista es la capa VISUAL que aterriza en ese ganador.
  *
- * Características:
- *  - Giro único o múltiples vueltas: las N-1 primeras son DEMOSTRACIONES que
- *    revelan al "ganador del momento", y la última es "LA QUE DEFINE EL GANADOR".
- *  - NOMBRES SIEMPRE VISIBLES: el dibujo adapta el tamaño de fuente al radio y a
- *    la cantidad de participantes (auto-tamaño recomendado para garantizar
- *    legibilidad sin desbordarse ni invadir otros sectores).
- *  - Sonido estilo ruleta real: zumbido de aire (ruido filtrado) + tono grave,
- *    con un "clack" de madera en cada cambio de sector (acelera y frena solo).
- *  - Modal de ganador con confeti al terminar y grabación de video (.webm).
+ * FORMATO HÍBRIDO AUTOMÁTICO:
+ *  - `ruleta` (circular clásica): cuando hay pocos participantes (n <= 18),
+ *    los nombres caben legibles dentro de cada sector.
+ *  - `tambor` / gigantón: cuando hay muchos participantes, en lugar de un pastel
+ *    con sectores diminutos se dibuja un TAMBOR VERTICAL donde CADA participante
+ *    es una fila GIGANTE (número + nombre) que gira detrás de una flecha. Con
+ *    esto TODOS los nombres quedan legibles sin importar la cantidad.
+ *
+ * Además, en ambos formatos hay un BANNER gigante (callback onBanner) que muestra
+ * en vivo, a alta velocidad, el NOMBRE del participante que está bajo la aguja.
+ *
+ * Otras características:
+ *  - N vuelta(s): las N-1 primeras son DEMOSTRACIONES (revelan al "ganador del
+ *    momento") y la última es "RULETA N DE N QUE DEFINE EL GANADOR".
+ *  - Modo MANUAL: entre giros se espera a que el usuario pulse un botón.
+ *  - Sonido estilo ruleta/tambor real: aire + tono grave + "clack" por sector/fila.
+ *  - Video de evidencia de alta calidad: 60 fps, bitrate alto y con el sonido.
+ *  - Modal de ganador con confeti al terminar.
  * -----------------------------------------------------------------------------
  */
 class RuletaCanvas {
@@ -22,8 +30,10 @@ class RuletaCanvas {
    * @param {HTMLCanvasElement} canvas
    * @param {Array<{numero:number, nombre:string, label?:string}>} participantes - solo pagados
    * @param {Object} [opts]
+   * @param {'auto'|'ruleta'|'tambor'} [opts.modo]
    * @param {Function} [opts.onEstado] - callback(texto) para la UI de estado
-   * @param {Function} [opts.onMomento] - callback(participante, idxVuelta, totalVueltas, esDefinitiva) al revelar un resultado del momento
+   * @param {Function} [opts.onBanner] - callback(idx, participante) nombre en vivo bajo la aguja
+   * @param {Function} [opts.onMomento] - callback(participante, idxVuelta, totalVueltas, esDefinitiva)
    * @param {Function} [opts.onGanador] - callback() al revelar al ganador definitivo
    */
   constructor(canvas, participantes, opts) {
@@ -32,9 +42,12 @@ class RuletaCanvas {
     this.participantes = participantes || [];
     this.opts = opts || {};
     this.onEstado = this.opts.onEstado || null;
+    this.onBanner = this.opts.onBanner || null;
     this.onMomento = this.opts.onMomento || null;
     this.onGanador = this.opts.onGanador || null;
-    this.anguloActual = 0;
+
+    this.anguloActual = 0;   // ruleta circular
+    this.offsetY = 0;        // tambor vertical
     this.colores = ['#0B1229', '#16213F', '#D4A017', '#E8B923'];
     this._mediaRecorder = null;
     this._chunks = [];
@@ -43,10 +56,14 @@ class RuletaCanvas {
     this._winnerIdx = -1;
     this._mostrarGanador = false;
     this._raf = null;
+    this._lastBannerIdx = -1;
 
-    // Audio: contexto + buffer de ruido blanco para el "aire" y los golpes.
-    // Todo se enruta a un MASTER que va a los parlantes Y a la grabación
-    // (mediaStreamDestination) para que el video de evidencia incluya el sonido.
+    // Umbrales del formato híbrido
+    this.UMBRAL_TAMBOR = 18;
+    const modoPc = this.opts.modo || 'auto';
+    this.modo = modoPc === 'auto' ? (this.participantes.length > this.UMBRAL_TAMBOR ? 'tambor' : 'ruleta') : modoPc;
+
+    // Audio: contexto + buffer de ruido blanco enrutado a un MASTER grabable.
     this._audioContext = null;
     this._audioEnabled = false;
     this._master = null;
@@ -63,7 +80,12 @@ class RuletaCanvas {
     this._maxNameLen = Math.max(1, ...this.participantes.map(p => String(p.nombre || '').length), 1);
     this._maxName = this.participantes.reduce((a, p) => (String(p.nombre || '').length > String(a || '').length ? p.nombre : a), '');
 
-    this._bake();
+    this._dims();
+    if (this.modo === 'tambor') {
+      this.offsetY = Math.floor(Math.random() * Math.max(this.participantes.length, 1)) * this._rowH;
+    } else {
+      this._bake();
+    }
     this.dibujar();
   }
 
@@ -176,14 +198,58 @@ class RuletaCanvas {
     o.start(t); o.stop(t + 0.3);
   }
 
-  // ======================== DIBUJO / LEGIBILIDAD =============================
+  // ============================ DIMENSIONES =================================
+
+  _dims() {
+    const { canvas } = this;
+    const w = canvas.width, h = canvas.height;
+    if (this.modo === 'tambor') {
+      this._rowH = Math.max(40, Math.floor((h - 56) / 6));
+      this._ptrY = Math.round(this._rowH * 1.9);
+      this._rowFont = Math.max(16, Math.floor(this._rowH * 0.62));
+    }
+  }
 
   _radio() {
     const { canvas } = this;
     return Math.min(canvas.width, canvas.height) / 2 - 10;
   }
 
-  /** Caracteres que caben por línea dentro del sector, según radio y fuente. */
+  /**
+   * Dimensiones recomendadas {w,h} para que TODO sea legible:
+   *  - ruleta: cuadrado con fuente legible por sector
+   *  - tambor: ancho según el nombre más largo, alto según ~6 filas visibles
+   */
+  tamanoRecomendado() {
+    if (this.modo === 'tambor') {
+      const F = 30;
+      const rowH = Math.ceil(F * 1.5);
+      const ptrY = Math.round(rowH * 1.9);
+      const h = Math.round(ptrY + 4 * rowH + 26);
+      const numW = 110;
+      const nameW = Math.max(120, Math.ceil(this._maxNameLen * 0.62 * F));
+      const w = Math.min(860, Math.max(380, numW + nameW + 40));
+      return { w, h };
+    }
+    const s = this._tamanoCircular();
+    return { w: s, h: s };
+  }
+
+  _tamanoCircular() {
+    const n = Math.max(this.participantes.length, 1);
+    let R = Math.min(1600, Math.max(240, n * 4 + 300));
+    for (let i = 0; i < 70 && R < 1600; i++) {
+      const F = this._calcularFuente(R);
+      const chars = this._charsPorLinea(R, F);
+      const lines = this._wrappear(String(this._maxName || ''), chars).length;
+      if (F >= 13 && lines <= 3) break;
+      R += 25;
+    }
+    return Math.min(1600, Math.max(360, Math.round(R)));
+  }
+
+  // ====================== RULETA CIRCULAR (pocos) ===========================
+
   _charsPorLinea(radio, F) {
     const n = Math.max(this.participantes.length, 1);
     const angle = n === 1 ? Math.PI * 0.9 : (2 * Math.PI) / n;
@@ -191,7 +257,6 @@ class RuletaCanvas {
     return Math.max(1, Math.floor((chord * 0.92) / (0.60 * F)));
   }
 
-  /** Fuente óptima para que el nombre más largo quepa sin desbordar. */
   _calcularFuente(radio) {
     const n = Math.max(this.participantes.length, 1);
     const angle = n === 1 ? Math.PI * 0.9 : (2 * Math.PI) / n;
@@ -200,28 +265,10 @@ class RuletaCanvas {
       const chord = 2 * 0.60 * radio * Math.sin(angle / 2);
       const chars = Math.max(1, Math.floor((chord * 0.92) / (0.60 * F)));
       const lines = Math.max(1, Math.ceil(this._maxNameLen / chars));
-      // Radial: etiqueta + líneas de nombre deben caber en la banda [0.50R, 0.95R]
       const radialF = (0.45 * radio) / (0.6 + 1.12 * lines);
       F = Math.min(F, radialF, 30);
     }
     return Math.max(7, Math.floor(F));
-  }
-
-  /**
-   * Diámetro recomendado (px) para que TODOS los nombres sean legibles:
-   * fuente >= 12px y máximo 3 líneas por nombre.
-   */
-  tamanoRecomendado() {
-    const n = Math.max(this.participantes.length, 1);
-    let R = Math.min(1600, Math.max(240, n * 4 + 300));
-    for (let i = 0; i < 70 && R < 1600; i++) {
-      const F = this._calcularFuente(R);
-      const chars = this._charsPorLinea(R, F);
-      const lines = this._wrappear(String(this._maxName || ''), chars).length;
-      if (F >= 12 && lines <= 3) break;
-      R += 25;
-    }
-    return Math.min(1600, Math.max(360, Math.round(R)));
   }
 
   _wrappear(texto, chars) {
@@ -249,6 +296,7 @@ class RuletaCanvas {
   }
 
   _bake() {
+    if (this.modo === 'tambor') return; // el tambor se dibuja directo, sin caché
     const W = this.canvas.width, H = this.canvas.height;
     const cx = W / 2, cy = H / 2;
     const radio = this._radio();
@@ -311,7 +359,137 @@ class RuletaCanvas {
     this._cache = off;
   }
 
+  // ========================= TAMBOR VERTICAL (muchos) =======================
+
+  _bannerIdxTambor() {
+    const n = Math.max(this.participantes.length, 1);
+    const contentH = n * Math.max(this._rowH, 1);
+    const off = ((this.offsetY % contentH) + contentH) % contentH;
+    return Math.floor(off / Math.max(this._rowH, 1)) % n;
+  }
+
+  _bannerIdxRuleta() {
+    const n = Math.max(this.participantes.length, 1);
+    const a = ((this.anguloActual % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
+    return Math.floor(a / ((2 * Math.PI) / n)) % n;
+  }
+
+  _bannerIdx() {
+    return this.modo === 'tambor' ? this._bannerIdxTambor() : this._bannerIdxRuleta();
+  }
+
+  _rr(o, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    o.beginPath();
+    o.moveTo(x + rr, y);
+    o.arcTo(x + w, y, x + w, y + h, rr);
+    o.arcTo(x + w, y + h, x, y + h, rr);
+    o.arcTo(x, y + h, x, y, rr);
+    o.arcTo(x, y, x + w, y, rr);
+    o.closePath();
+  }
+
+  _dibujarTambor() {
+    const { ctx, canvas } = this;
+    const w = canvas.width, h = canvas.height;
+    const rowH = this._rowH || 50, ptrY = this._ptrY || Math.round(rowH * 1.9);
+    const n = Math.max(this.participantes.length, 1);
+    const contentH = n * rowH;
+    const off = ((this.offsetY % contentH) + contentH) % contentH;
+    const idx0 = Math.floor(off / rowH);
+    const top0 = ptrY - Math.round(rowH / 2) - (off % rowH);
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0B1229';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
+
+    const numW = 108;
+    const nameMaxChars = Math.max(3, Math.floor((w - numW - 60) / (0.56 * this._rowFont)));
+    const colorEsq = ['#14203F', '#1B2B52'];
+
+    let y = top0;
+    for (let k = 0; k <= n; k++) {
+      const i = (idx0 + k) % n;
+      const p = this.participantes[i];
+      const esGanador = this._mostrarGanador && i === this._winnerIdx;
+
+      const F = this._rowFont;
+      if (esGanador) ctx.fillStyle = '#9A6B00';
+      else ctx.fillStyle = colorEsq[i % 2];
+      this._rr(ctx, 14, y + 5, w - 28, rowH - 10, 12);
+      ctx.fill();
+
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold ' + Math.floor(F * 0.8) + 'px JetBrains Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = esGanador ? '#fff' : 'rgba(232,185,35,.95)';
+      ctx.fillText('#' + (p.label != null ? p.label : p.numero), 26, y + rowH / 2);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(10 + numW, y + 5, w - 20 - numW, rowH - 10);
+      ctx.clip();
+      let nombre = String(p.nombre || '—');
+      if (nombre.length > nameMaxChars) nombre = nombre.slice(0, nameMaxChars - 1) + '…';
+      ctx.font = 'bold ' + F + 'px Sora, sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(nombre, 24 + numW, y + rowH / 2);
+      ctx.restore();
+
+      y += rowH;
+    }
+    ctx.restore();
+
+    // Degradado superior / inferior (ventana)
+    const fade = Math.min(h / 3, this._rowFont * 2.4);
+    const grdTop = ctx.createLinearGradient(0, 0, 0, fade);
+    grdTop.addColorStop(0, '#0B1229');
+    grdTop.addColorStop(1, 'rgba(11,18,41,0)');
+    ctx.fillStyle = grdTop;
+    ctx.fillRect(0, 0, w, fade);
+    const grdBot = ctx.createLinearGradient(0, h - fade, 0, h);
+    grdBot.addColorStop(0, 'rgba(11,18,41,0)');
+    grdBot.addColorStop(1, '#0B1229');
+    ctx.fillStyle = grdBot;
+    ctx.fillRect(0, h - fade, w, fade);
+
+    // Flecha / puntero dorado
+    const px = w / 2;
+    ctx.beginPath();
+    ctx.moveTo(px - 20, Math.max(4, ptrY - 48));
+    ctx.lineTo(px + 20, Math.max(4, ptrY - 48));
+    ctx.lineTo(px, Math.max(4, ptrY - 6));
+    ctx.closePath();
+    ctx.fillStyle = '#D4A017';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // ============================== DIBUJO ====================================
+
   dibujar() {
+    if (this.modo === 'tambor') {
+      this._dibujarTambor();
+    } else {
+      this._dibujarRuleta();
+    }
+
+    // Banner en vivo: el nombre que está bajo la aguja
+    const idx = this._bannerIdx();
+    if (this.onBanner && idx !== this._lastBannerIdx) {
+      this._lastBannerIdx = idx;
+      this.onBanner(idx, this.participantes[idx]);
+    }
+  }
+
+  _dibujarRuleta() {
     const { ctx, canvas } = this;
     const cx = canvas.width / 2, cy = canvas.height / 2;
     const radio = this._radio();
@@ -359,7 +537,8 @@ class RuletaCanvas {
   cambiarTamano(w, h) {
     this.canvas.width = w || this.canvas.width;
     this.canvas.height = h || this.canvas.height;
-    this._bake();
+    this._dims();
+    if (this.modo !== 'tambor') this._bake();
     this.dibujar();
   }
 
@@ -369,7 +548,7 @@ class RuletaCanvas {
     if (!this.canvas.captureStream) return false;
     if (this._mediaRecorder && this._mediaRecorder.state === 'recording') return false;
 
-    // Video a 60 fps + audio de la ruleta (del master enrutado a mediaStreamDestination)
+    // Video a 60 fps + audio de la ruleta (master enrutado a mediaStreamDestination)
     const stream = this.canvas.captureStream(60);
     try {
       if (this._audioDest && this._audioDest.stream && this._audioDest.stream.getAudioTracks().length) {
@@ -409,6 +588,11 @@ class RuletaCanvas {
   // ============================= GIRO =======================================
 
   _girarUna(idxObjetivo, duracionMs) {
+    if (this.modo === 'tambor') return this._girarTambor(idxObjetivo, duracionMs);
+    return this._girarRuleta(idxObjetivo, duracionMs);
+  }
+
+  _girarRuleta(idxObjetivo, duracionMs) {
     return new Promise((resolve) => {
       if (this._raf) cancelAnimationFrame(this._raf);
       const n = Math.max(this.participantes.length, 1);
@@ -419,11 +603,7 @@ class RuletaCanvas {
       const anguloInicial = this.anguloActual;
       const distancia = anguloFinal - (anguloInicial % (2 * Math.PI));
 
-      const idxSector = () => {
-        const a = ((this.anguloActual % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
-        return Math.floor(a / anguloSegmento);
-      };
-      let ultimoSector = idxSector();
+      let ultimoSector = this._bannerIdxRuleta();
 
       this._setSpinSound(true);
       const inicio = performance.now();
@@ -433,8 +613,46 @@ class RuletaCanvas {
         const easeOut = 1 - Math.pow(1 - t, 5);
         this.anguloActual = anguloInicial + distancia * easeOut;
 
-        const s = idxSector();
+        const s = this._bannerIdxRuleta();
         if (s !== ultimoSector) { this._playTick(); ultimoSector = s; }
+
+        this.dibujar();
+        if (t < 1) { this._raf = requestAnimationFrame(paso); }
+        else {
+          this._raf = null;
+          this._setSpinSound(false);
+          resolve();
+        }
+      };
+      this._raf = requestAnimationFrame(paso);
+    });
+  }
+
+  _girarTambor(idxObjetivo, duracionMs) {
+    return new Promise((resolve) => {
+      if (this._raf) cancelAnimationFrame(this._raf);
+      const n = Math.max(this.participantes.length, 1);
+      const rowH = Math.max(this._rowH || 50, 1);
+      const contentH = n * rowH;
+      const mod = (x) => ((x % contentH) + contentH) % contentH;
+      const target = mod(idxObjetivo * rowH);
+      let delta = target - mod(this.offsetY);
+      if (delta < 0) delta += contentH;
+      const total = delta + 5 * contentH;
+      const inicio = performance.now();
+      const startOffset = this.offsetY;
+
+      let ultimoBanner = this._bannerIdxTambor();
+
+      this._setSpinSound(true);
+
+      const paso = (ahora) => {
+        const t = Math.min(1, (ahora - inicio) / duracionMs);
+        const easeOut = 1 - Math.pow(1 - t, 5);
+        this.offsetY = startOffset + total * easeOut;
+
+        const b = this._bannerIdxTambor();
+        if (b !== ultimoBanner) { this._playTick(); ultimoBanner = b; }
 
         this.dibujar();
         if (t < 1) { this._raf = requestAnimationFrame(paso); }
@@ -452,14 +670,12 @@ class RuletaCanvas {
 
   /**
    * Sorteo visual completo.
-   * Si `vueltas > 1`, las primeras son DEMOSTRACIONES: giran a un número al
-   * azar, se REVELA al "ganador de ese momento" en pantalla con el mensaje
-   * "RULETA X DE N", y luego la última vuelta es "RULETA N DE N QUE DEFINE EL
-   * GANADOR" y aterriza en el ganador real decidido por el backend.
+   * Si `vueltas > 1`, las primeras son DEMOSTRACIONES: aterrizan en un número
+   * al azar, REVELAN al "ganador de ese momento" (RULETA X DE N), y la última
+   * vuelta es "RULETA N DE N QUE DEFINE EL GANADOR" sobre el ganador real.
    *
-   * En modo MANUAL (`opts.manual = true`) el giro NO es automático: después de
-   * cada revelación se espera a que `opts.onEsperaContinuar(vueltaActual, totalVueltas)`
-   * resuelva (p.ej. cuando el usuario pulsa un botón), para dar pausa y explicar.
+   * En modo MANUAL (`opts.manual = true`) el giro NO es automático: se espera a
+   * que `opts.onEsperaContinuar(vueltaActual, totalVueltas)` resuelva (botón).
    * También se espera antes de revelar al ganador definitivo.
    *
    * @param {number} numeroGanador - número ganador decidido por el backend

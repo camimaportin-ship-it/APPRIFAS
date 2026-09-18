@@ -612,7 +612,14 @@ table.tbl tr:hover td{background:var(--gold-100);}
 /* ---------- Layout de animaciones (ruleta / balotera) ---------- */
 .anim-layout{display:flex; gap:18px; align-items:flex-start; justify-content:center; flex-wrap:wrap;}
 .anim-canvas{flex:0 0 auto; max-width:100%;}
+.anim-lado{flex:0 0 300px; max-width:100%; display:flex; flex-direction:column; gap:10px;}
+.ruleta-banner{background:linear-gradient(135deg,#16213F,#0B1229); border:1px solid rgba(212,160,23,.5); border-radius:14px; padding:10px 14px; text-align:center; color:#fff; box-shadow:0 8px 24px rgba(0,0,0,.25);}
+.ruleta-banner .lbl{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.55); margin-bottom:4px;}
+.ruleta-banner .numero{font-size:14px; color:#E8B923; font-weight:700; font-family:var(--mono); margin-bottom:2px;}
+.ruleta-banner .nombre{font-size:19px; font-weight:800; line-height:1.25; color:#fff; min-height:1.4em; word-break:break-word;}
+@media(min-width:900px){.ruleta-banner .nombre{font-size:26px;}}
 .anim-lista{flex:0 0 240px; max-width:100%; text-align:left; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface); padding:12px 14px; max-height:380px; overflow:auto;}
+.anim-lado .anim-lista{flex:1 1 auto; width:100%;}
 .anim-lista h4{font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-600); margin-bottom:8px;}
 .anim-lista-ol{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px;}
 .anim-lista-ol li{display:flex; gap:8px; align-items:center; font-size:13px; padding:5px 8px; border-radius:6px;}
