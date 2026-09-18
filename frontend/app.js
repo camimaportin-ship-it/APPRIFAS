@@ -4046,6 +4046,7 @@ function ticketDisplay(numero, simbolo) {
 // Genera y descarga el acta del sorteo como PDF (sin librerías externas)
 function descargarActaPDF(rifa, resultado) {
   const esChance = modoEsChance(rifa);
+  const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
   let subtitulos = 'Rifa: ' + rifa.nombre + '\n';
   subtitulos += 'Producto: ' + (rifa.producto || 'N/A') + '\n';
   subtitulos += 'Sorteo: ' + (rifa.fecha_sorteo || 'N/A') + '\n';
@@ -4064,7 +4065,21 @@ function descargarActaPDF(rifa, resultado) {
       const ganador = p.ganador ? p.ganador.nombre : 'SIN GANADOR';
       filas.push([num, (p.nombre || 'Premio') + ': ' + ganador]);
     });
+  } else if (esCuatro) {
+    // Mostrar grupos de números por ganador en modality 4 oportunidades
+    const numerosData = await api('/rifas/' + rifa.id + '/numeros');
+    const grupos = numerosData.grupos || [];
+    // Buscar ganadores en los grupos
+    const ganadores = grupos.filter(g => g.estado === 'pagado' || g.estado === 'vendida');
+    ganadores.forEach((g, i) => {
+      const nums = g.numeros ? g.numeros.map(n => String(n).padStart(2, '0')).join(', ') : '';
+      filas.push([String(i + 1), 'Grupo ' + (i + 1) + ': ' + nums + ' · ' + (g.ganador_nombre || 'Sin nombre ganador')]);
+    });
+    if (ganadores.length === 0) {
+      filas.push(['', 'No hay grupos pagados para este sorteo']);
+    }
   } else {
+    // Modalidad boleta normal
     filas.push(['', 'BOLETA GANADORA: ' + resultado.numeroDisplay]);
     if (resultado.ganador) filas.push(['', 'Ganador: ' + resultado.ganador.nombre]);
     filas.push(['', 'Semilla: ' + resultado.semilla]);
@@ -4250,11 +4265,62 @@ function crearPDF(opts) {
 async function exportarReportePDF(rifaId) {
   const rifa = await api('/rifas/' + rifaId);
   const participantes = await api('/rifas/' + rifaId + '/participantes');
-  const ganadores = await api('/rifas/' + rifaId + '/ganadores');
+  const numerosData = await api('/rifas/' + rifaId + '/numeros');
 
   const pagados = participantes.filter(p => p.estado_pago === 'pagado');
   const pendientes = participantes.filter(p => p.estado_pago === 'pendiente');
   const recaudado = pagados.length * Number(rifa.precio_boleta || 0);
+
+  const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
+  const esChance = modoEsChance(rifa);
+
+  // Encabezados y ancho de columnas según modalidad
+  let encabezados;
+  let anchoColumnas;
+  let filas;
+
+  if (esCuatro) {
+    // Mostrar grupos de números por participante
+    const grupos = numerosData.grupos || [];
+    // Construir mapa de participantes a sus grupos
+    const participanteGrupos = {};
+    participantes.forEach(p => {
+      const pNum = p.numero;
+      const gruposParticipante = grupos.filter(g => 
+        g.numeros && g.numeros.some(no => String(no) === String(pNum))
+      );
+      participanteGrupos[p.id] = gruposParticipante;
+    });
+    
+    encabezados = ['Participante', 'Grupos Numeros'];
+    anchoColumnas = [200, 365];
+    filas = pagados.map(p => {
+      const gruposP = participanteGrupos[p.id] || [];
+      const nums = gruposP.map(g => g.numeros ? g.numeros.map(n => String(n).padStart(2, '0')).join(', ') : '').join(' | ');
+      return [p.nombre || 'Sin nombre', nums || 'Sin números'];
+    });
+  } else if (esChance) {
+    // Mostrar número + símbolo por participante
+    const boletas = numerosData.boletas || [];
+    const participanteBoletas = {};
+    participantes.forEach(p => {
+      const boletasP = boletas.filter(b => b.numero === p.numero || (b.numero == null && b.simbolo === p.numeros?.[0]));
+      participanteBoletas[p.id] = boletasP;
+    });
+    
+    encabezados = ['Participante', 'Numero + Simbolo'];
+    anchoColumnas = [200, 365];
+    filas = pagados.map(p => {
+      const boletasP = participanteBoletas[p.id] || [];
+      const simbs = boletasP.map(b => String(b.numero).padStart(2, '0') + ' + ' + b.simbolo).join(', ');
+      return [p.nombre || 'Sin nombre', simbs || 'Sin boletas'];
+    });
+  } else {
+    // Modalidad boleta normal - mostrar número de boleta
+    encabezados = ['Boleta', 'Nombre'];
+    anchoColumnas = [80, 485];
+    filas = pagados.map(p => [mostrarNumerosBoleta(rifa, p), (p.nombre || '').substring(0, 60)]);
+  }
 
   const subtitulos = [
     'Rifa: ' + rifa.nombre,
@@ -4265,15 +4331,11 @@ async function exportarReportePDF(rifaId) {
     'Generado: ' + new Date().toLocaleString('es-CO')
   ].join('\n');
 
-  const encabezados = ['Numero', 'Nombre'];
-  const anchoColumnas = [80, 485];
-  const filasPagados = pagados.map(p => [String(p.numero ?? ''), (p.nombre || '').substring(0, 60)]);
-
   const bytes = crearPDF({
     titulo: 'REPORTE DE RIFA - RIFAS SYC',
     subtitulo: subtitulos,
     encabezados: encabezados,
-    filas: filasPagados,
+    filas: filas,
     anchoColumnas: anchoColumnas
   });
   const blob = new Blob([bytes], { type: 'application/pdf' });
