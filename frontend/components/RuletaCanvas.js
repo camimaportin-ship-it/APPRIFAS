@@ -44,9 +44,13 @@ class RuletaCanvas {
     this._mostrarGanador = false;
     this._raf = null;
 
-    // Audio: contexto + buffer de ruido blanco para el "aire" y los golpes
+    // Audio: contexto + buffer de ruido blanco para el "aire" y los golpes.
+    // Todo se enruta a un MASTER que va a los parlantes Y a la grabación
+    // (mediaStreamDestination) para que el video de evidencia incluya el sonido.
     this._audioContext = null;
     this._audioEnabled = false;
+    this._master = null;
+    this._audioDest = null;
     this._noiseBuf = null;
     this._tickPlaying = false;
     this._airSource = null;
@@ -69,6 +73,11 @@ class RuletaCanvas {
     try {
       this._audioContext = new (window.AudioContext || window.webkitAudioContext)();
       this._audioEnabled = true;
+      this._master = this._audioContext.createGain();
+      this._master.gain.value = 1;
+      this._master.connect(this._audioContext.destination);
+      this._audioDest = this._audioContext.createMediaStreamDestination();
+      this._master.connect(this._audioDest);
       const sr = this._audioContext.sampleRate;
       const buf = this._audioContext.createBuffer(1, Math.floor(sr * 0.5), sr);
       const d = buf.getChannelData(0);
@@ -88,7 +97,7 @@ class RuletaCanvas {
     o.frequency.value = 1250 + Math.random() * 260;
     g.gain.setValueAtTime(0.30, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-    o.connect(g); g.connect(c.destination);
+    o.connect(g); g.connect(this._master);
     o.start(t); o.stop(t + 0.06);
 
     const src = c.createBufferSource();
@@ -99,7 +108,7 @@ class RuletaCanvas {
     const ng = c.createGain();
     ng.gain.setValueAtTime(0.10, t);
     ng.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
-    src.connect(bp); bp.connect(ng); ng.connect(c.destination);
+    src.connect(bp); bp.connect(ng); ng.connect(this._master);
     src.start(t); src.stop(t + 0.04);
 
     setTimeout(() => { this._tickPlaying = false; }, 45);
@@ -117,13 +126,13 @@ class RuletaCanvas {
       const lp = c.createBiquadFilter();
       lp.type = 'lowpass'; lp.frequency.value = 850; lp.Q.value = 0.7;
       const sw = c.createGain(); sw.gain.value = 0.055;
-      src.connect(lp); lp.connect(sw); sw.connect(c.destination);
+      src.connect(lp); lp.connect(sw); sw.connect(this._master);
       src.start();
 
       const o = c.createOscillator(), og = c.createGain();
       o.type = 'sine'; o.frequency.value = 74;
       og.gain.value = 0.045;
-      o.connect(og); og.connect(c.destination); o.start();
+      o.connect(og); og.connect(this._master); o.start();
 
       this._airSource = src; this._airFilter = lp; this._airGain = sw;
       this._spinOsc = o; this._spinGain = og;
@@ -148,7 +157,7 @@ class RuletaCanvas {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
-      o.connect(g); g.connect(c.destination);
+      o.connect(g); g.connect(this._master);
       o.start(t); o.stop(t + 0.9);
     });
   }
@@ -163,7 +172,7 @@ class RuletaCanvas {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
-    o.connect(g); g.connect(c.destination);
+    o.connect(g); g.connect(this._master);
     o.start(t); o.stop(t + 0.3);
   }
 
@@ -359,15 +368,29 @@ class RuletaCanvas {
   iniciarGrabacion() {
     if (!this.canvas.captureStream) return false;
     if (this._mediaRecorder && this._mediaRecorder.state === 'recording') return false;
-    const stream = this.canvas.captureStream(30);
-    this._chunks = [];
+
+    // Video a 60 fps + audio de la ruleta (del master enrutado a mediaStreamDestination)
+    const stream = this.canvas.captureStream(60);
     try {
-      this._mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+      if (this._audioDest && this._audioDest.stream && this._audioDest.stream.getAudioTracks().length) {
+        stream.addTrack(this._audioDest.stream.getAudioTracks()[0]);
+      }
+    } catch (e) {}
+
+    this._chunks = [];
+    const bits = Math.min(24000000, Math.max(8000000, Math.round(this.canvas.width * this.canvas.height * 15)));
+    const opts = { videoBitsPerSecond: bits, audioBitsPerSecond: 256000 };
+    try {
+      this._mediaRecorder = new MediaRecorder(stream, Object.assign({ mimeType: 'video/webm;codecs=vp9' }, opts));
     } catch (e) {
-      this._mediaRecorder = new MediaRecorder(stream);
+      try {
+        this._mediaRecorder = new MediaRecorder(stream, Object.assign({ mimeType: 'video/webm' }, opts));
+      } catch (e2) {
+        this._mediaRecorder = new MediaRecorder(stream, opts);
+      }
     }
     this._mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) this._chunks.push(e.data); };
-    this._mediaRecorder.start();
+    this._mediaRecorder.start(100);
     return true;
   }
 
@@ -434,14 +457,21 @@ class RuletaCanvas {
    * "RULETA X DE N", y luego la última vuelta es "RULETA N DE N QUE DEFINE EL
    * GANADOR" y aterriza en el ganador real decidido por el backend.
    *
+   * En modo MANUAL (`opts.manual = true`) el giro NO es automático: después de
+   * cada revelación se espera a que `opts.onEsperaContinuar(vueltaActual, totalVueltas)`
+   * resuelva (p.ej. cuando el usuario pulsa un botón), para dar pausa y explicar.
+   * También se espera antes de revelar al ganador definitivo.
+   *
    * @param {number} numeroGanador - número ganador decidido por el backend
-   * @param {Object} [opts] - { vueltas, duracionMs }
+   * @param {Object} [opts] - { vueltas, duracionMs, manual, onEsperaContinuar }
    * @returns {Promise<string>} URL del video de evidencia
    */
   async girarMultiples(numeroGanador, opts) {
     opts = opts || {};
     const vueltas = Math.max(1, Number(opts.vueltas) || 1);
     const duracionMs = Number(opts.duracionMs) || 5000;
+    const manual = !!opts.manual;
+    const espera = ((opts.onEsperaContinuar && manual) ? opts.onEsperaContinuar : null);
     if (this._raf) cancelAnimationFrame(this._raf);
 
     const idxWinner = this.participantes.findIndex(p => String(p.numero) === String(numeroGanador));
@@ -458,6 +488,7 @@ class RuletaCanvas {
       let idxDemo = Math.floor(Math.random() * this.participantes.length);
       if (this.participantes.length > 1) while (idxDemo === idxWinner) idxDemo = Math.floor(Math.random() * this.participantes.length);
       const demo = this.participantes[idxDemo];
+      const textoGanadorMomento = `ganó ${demo.nombre} (#${demo.label != null ? demo.label : demo.numero}). Es una demostración: el sistema es 100% al azar.`;
 
       this._winnerIdx = idxDemo;
       this._mostrarGanador = false;
@@ -472,9 +503,11 @@ class RuletaCanvas {
       this._bake();
       this.dibujar();
       this._playBlip();
-      if (this.onEstado) this.onEstado(`🎲 RULETA ${v} DE ${vueltas} — ganó ${demo.nombre} (#${demo.label != null ? demo.label : demo.numero}). Es una demostración: el sistema es 100% al azar.`);
+      if (this.onEstado) this.onEstado(`🎲 RULETA ${v} DE ${vueltas} — ${textoGanadorMomento}` + (manual ? ' Elige el momento del siguiente giro. ⏸️' : ''));
       if (this.onMomento) this.onMomento(demo, v, vueltas, false);
-      await this._pausa(2600);
+
+      if (espera) await espera(v, vueltas);
+      else await this._pausa(2600);
     }
 
     // --------- Vuelta definitiva ---------
@@ -482,10 +515,15 @@ class RuletaCanvas {
     this._mostrarGanador = false;
     this._bake();
     this.dibujar();
-    if (this.onEstado) this.onEstado(`🏆 RULETA ${vueltas} DE ${vueltas} — QUE DEFINE EL GANADOR`);
+    if (this.onEstado) this.onEstado(`🏆 RULETA ${vueltas} DE ${vueltas} — QUE DEFINE EL GANADOR` + (manual ? ' Pulsa cuando estés listo para girar la última vuelta.' : ''));
     await this._girarUna(idxWinner, duracionMs);
 
     await this._pausa(400);
+
+    // En modo manual también se espera antes de revelar al campeón definitivo
+    if (manual && this.onEstado) this.onEstado('🎡 ¡La ruleta se ha detenido! Pulsa "Revelar al ganador" para descubrir el resultado.');
+    if (espera) await espera(vueltas, vueltas);
+
     this._winnerIdx = idxWinner;
     this._mostrarGanador = true;
     this._bake();
@@ -494,7 +532,7 @@ class RuletaCanvas {
     const ganador = this.participantes[idxWinner];
     const videoUrl = await this.detenerGrabacion();
 
-    if (this.onEstado) this.onEstado(`🏆 GANADOR: ${ganador.nombre} — número #${ganador.label != null ? ganador.label : ganador.numero}`);
+    if (this.onEstado) this.onEstado(`🏆 GANADOR: ${ganador.nombre} — número #${ganador.label != null ? ganador.label : ganador.numero}` + (manual ? ' 🎉' : ''));
     if (this.onMomento) this.onMomento(ganador, vueltas, vueltas, true);
     if (this.onGanador) this.onGanador();
     if (this.onEstado) this.onEstado('🏆 ¡Ganador revelado! 🎉');

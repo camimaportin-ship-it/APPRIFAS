@@ -3225,7 +3225,8 @@ async function renderSorteoTab(rifa, box) {
             </select>
           </div>
         </div>
-        <p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado, y <strong>todos los nombres se muestran en la ruleta</strong> (se ajusta sola al tamaño necesario para que nadie quede fuera). Las primeras vueltas son <strong>demostraciones</strong>: cada una revela a su "ganador del momento" con el mensaje <strong>RULETA X DE N</strong>, y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. Se graba video de evidencia. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>`;
+        <p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado, y <strong>todos los nombres se muestran en la ruleta</strong> (se ajusta sola al tamaño necesario para que nadie quede fuera). Las primeras vueltas son <strong>demostraciones</strong>: cada una revela a su "ganador del momento" con el mensaje <strong>RULETA X DE N</strong>, y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido de la ruleta)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
+        <label class="check-row mt-2"><input type="checkbox" id="ruleta-manual" checked> <span>⏸️ <strong>Pausar entre giros:</strong> yo elijo el momento del siguiente giro para dar pausa y explicar cada resultado</span></label>`;
     }
   };
   sel.addEventListener('change', renderConfig);
@@ -3292,6 +3293,22 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
       const tamFinal = Math.max(tamano, Math.min(rueda.tamanoRecomendado(), Math.floor(window.innerWidth - 40)));
       rueda.cambiarTamano(tamFinal, tamFinal);
       const resultado = await api('/rifas/' + rifa.id + '/sortear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const manualChk = document.getElementById('ruleta-manual');
+      const manual = !manualChk || manualChk.checked;
+      const onEsperaContinuar = (v, total) => new Promise((resolve) => {
+        document.querySelectorAll('#btn-ruleta-siguiente').forEach(el => el.remove());
+        const btn = document.createElement('button');
+        btn.id = 'btn-ruleta-siguiente';
+        btn.className = 'btn btn-gold btn-block';
+        btn.style.cssText = 'max-width:320px;margin:14px auto 0;display:block;';
+        const defnitiva = v >= total;
+        btn.textContent = defnitiva
+          ? '🔓 Revelar al ganador'
+          : (v + 1 === total ? `🏆 GIRO DEFINITIVO — RULETA ${total} DE ${total}` : `▶ Siguiente giro — RULETA ${v + 1} DE ${total}`);
+        const cont = document.getElementById('area-sorteo');
+        if (cont) cont.appendChild(btn);
+        btn.addEventListener('click', () => { btn.remove(); resolve(); });
+      });
 
       // Pantalla completa: mueve el mismo canvas a un overlay para maximizarlo
       const btnFs = document.getElementById('btn-ruleta-fullscreen');
@@ -3323,7 +3340,7 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
         rueda.cambiarTamano(nuevoTam, nuevoTam);
       });
 
-      const videoUrl = await rueda.girarMultiples(resultado.ganadores[0].numero, { vueltas, duracionMs: duracionSeg * 1000 });
+      const videoUrl = await rueda.girarMultiples(resultado.ganadores[0].numero, { vueltas, duracionMs: duracionSeg * 1000, manual, onEsperaContinuar });
       const filaGanadora = document.querySelector(`#area-sorteo [data-numero="${etiquetar(resultado.ganadores[0].numero)}"]`);
       if (filaGanadora) filaGanadora.classList.add('ganador');
       mostrarResultadoSorteo(rifa, resultado, videoUrl);
