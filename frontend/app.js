@@ -4044,7 +4044,7 @@ function ticketDisplay(numero, simbolo) {
 }
 
 // Genera y descarga el acta del sorteo como PDF (sin librerías externas)
-function descargarActaPDF(rifa, resultado) {
+async function descargarActaPDF(rifa, resultado) {
   const esChance = modoEsChance(rifa);
   const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
   let subtitulos = 'Rifa: ' + rifa.nombre + '\n';
