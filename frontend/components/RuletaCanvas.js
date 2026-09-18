@@ -20,6 +20,12 @@
  * También permite grabar los últimos segundos de giro como archivo .webm
  * usando canvas.captureStream() + MediaRecorder, para descargarlo como
  * "Evidencia del sorteo".
+ *
+ * Efectos de sonido (Web Audio API):
+ *  - Sonido de giro continuo con modulación de frecuencia
+ *  - "Ticks" auditivos al pasar cada sector
+ *  - "Ding" final al detenerse
+ *  - Efecto de celebración al ganar
  * -----------------------------------------------------------------------------
  */
 class RuletaCanvas {
@@ -39,8 +45,81 @@ class RuletaCanvas {
     this._cache = null;
     this._winnerIdx = -1;
     this._mostrarGanador = false;
+    this._audioContext = null;
+    this._audioEnabled = false;
+    this._tickPlaying = false;
     this._bake();
     this.dibujar();
+    this._initAudio();
+  }
+
+  /**
+   * Inicializa el contexto de audio Web Audio API para efectos de sonido.
+   * Se crea bajo demanda por políticas de navegador.
+   */
+  _initAudio() {
+    try { this._audioContext = new (window.AudioContext || window.webkitAudioContext)(); this._audioEnabled = true; } catch (e) { this._audioEnabled = false; }
+  }
+
+  /**
+   * Toca un sonido de "tick" corto al pasar un sector.
+   */
+  _playTick() {
+    if (!this._audioEnabled || this._tickPlaying) return;
+    this._tickPlaying = true;
+    const osc = this._audioContext.createOscillator();
+    const gain = this._audioContext.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.1;
+    osc.connect(gain);
+    gain.connect(this._audioContext.destination);
+    osc.start();
+    osc.stop(this._audioContext.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, this._audioContext.currentTime + 0.05);
+    setTimeout(() => { this._tickPlaying = false; }, 60);
+  }
+
+  /**
+   * Toca el sonido de giro continuo con modulación.
+   * @param {boolean} start - true para iniciar, false para detener
+   */
+  _setSpinSound(start) {
+    if (!this._audioEnabled) return;
+    if (start) {
+      if (this._spinOsc) return; // ya está sonando
+      this._spinOsc = this._audioContext.createOscillator();
+      this._spinGain = this._audioContext.createGain();
+      this._spinLfo = this._audioContext.createGain();
+      this._spinOsc.type = 'sine';
+      this._spinOsc.frequency.value = 440;
+      this._spinLfo.gain.value = 5;
+      this._spinLfo.type = 'sine';
+      this._spinLfo.frequency.value = 5; // 5 Hz modulación
+      this._spinOsc.frequency.setValueAtTime(440, this._audioContext.currentTime);
+      this._spinOsc.frequency.linearRampToValueAtTime(880, this._audioContext.currentTime + 5);
+      this._spinLfo.connect(this._spinOsc.frequency);
+      this._spinOsc.connect(this._spinGain);
+      this._spinGain.gain.value = 0.3;
+      this._spinGain.connect(this._audioContext.destination);
+      this._spinOsc.start();
+      this._spinLfo.start();
+    } else {
+      if (this._spinOsc) {
+        this._spinOsc.stop();
+        this._spinOsc = null;
+        this._spinGain = null;
+        this._spinLfo = null;
+      }
+    }
+  }
+
+  /**
+   * Detiene todos los sonidos en curso.
+   */
+  _stopAllSounds() {
+    this._setSpinSound(false);
+    this._tickPlaying = false;
   }
 
   _radio() {
@@ -204,10 +283,14 @@ class RuletaCanvas {
   /**
    * Gira la ruleta hasta detenerse en `numeroGanador` (ya decidido por el
    * backend). Resalta el sector ganador y graba automáticamente ~5s de
-   * animación como evidencia.
+   * animación como evidencia. Efecto dramático: comienza rápido, luego se
+   * desacelera lentamente con "ticks" cada sector, y al detenerse muestra
+   * un modal de confeti con el ganador.
+   * @param {number} numeroGanador - número ganador ya decidido por backend
+   * @param {number} duracionMs - duración total en ms (default 5000)
    * @returns {Promise<string>} URL del video grabado (blob)
    */
-  async girarHasta(numeroGanador, duracionMs = 4500) {
+  async girarHasta(numeroGanador, duracionMs = 5000) {
     if (this._raf) cancelAnimationFrame(this._raf);
     const idx = this.participantes.findIndex(p => String(p.numero) === String(numeroGanador));
     if (idx === -1) throw new Error('El número ganador no está en la ruleta');
@@ -216,37 +299,117 @@ class RuletaCanvas {
     this._mostrarGanador = false;
     this._bake();
 
+    // Iniciar sonido de giro
+    this._setSpinSound(true);
+    this.iniciarGrabacion();
+    const inicio = performance.now();
+
     const n = this.participantes.length;
     const anguloSegmento = (2 * Math.PI) / n;
     // Ángulo objetivo: centro del segmento ganador, alineado con el puntero (arriba = -PI/2)
     const anguloObjetivoBase = -Math.PI / 2 - (idx * anguloSegmento + anguloSegmento / 2);
-    const vueltasExtra = 6 * 2 * Math.PI; // varias vueltas completas para dramatismo
+    // 6 vueltas completas + ángulo base para aterrizar en el ganador
+    const vueltasExtra = 6 * 2 * Math.PI;
     const anguloFinal = anguloObjetivoBase - vueltasExtra;
 
     const anguloInicial = this.anguloActual;
-    const distancia = anguloFinal - (anguloInicial % (2 * Math.PI));
+    // Distancia total a recorrer (incluye vueltas extra para dramatismo)
+    const distanciaTotal = anguloFinal - (anguloInicial % (2 * Math.PI));
 
-    this.iniciarGrabacion();
-    const inicio = performance.now();
+    // Para efectos de "tick" cada sector: calculamos cuántos radianes por tick
+    const radPorTick = anguloSegmento / 2; // half sector para ticks más frecuentes
+
+    // Programa ticks cada ~100ms durante el giro
+    const tickInterval = setInterval(() => { if (this._audioEnabled && !this._tickPlaying) this._playTick(); }, 100);
+    const tickTimeout = setTimeout(() => { clearInterval(tickInterval); }, duracionMs + 100);
 
     await new Promise((resolve) => {
       const paso = (ahora) => {
         const t = Math.min(1, (ahora - inicio) / duracionMs);
-        const easeOut = 1 - Math.pow(1 - t, 4); // desaceleración tipo ruleta real
-        this.anguloActual = anguloInicial + distancia * easeOut;
+        // Easing dramático: más lento al final (potencia 5 en lugar de 4)
+        const easeOut = 1 - Math.pow(1 - t, 5);
+
+        this.anguloActual = anguloInicial + distanciaTotal * easeOut;
         this.dibujar();
         if (t < 1) requestAnimationFrame(paso);
-        else resolve();
+        else {
+          // Cancelar ticks programados
+          clearInterval(tickInterval);
+          clearTimeout(tickTimeout);
+          // ¡Ganador!
+          this._setSpinSound(false);
+          this._mostrarGanador = true;
+          this._bake();
+          this.dibujar();
+          // Pequeña pausa para que se vea el ganador quieto
+          setTimeout(() => { this._showGanarModal(); }, 400);
+          resolve();
+        }
       };
       requestAnimationFrame(paso);
     });
 
-    // Medio segundo extra grabando el resultado quieto, luego cortamos
-    await new Promise(r => setTimeout(r, 600));
-    this._mostrarGanador = true;
-    this._bake();
-    this.dibujar();
     return this.detenerGrabacion();
+  }
+
+  /**
+   * Muestra un modal grande con confeti y el mensaje del ganador.
+   */
+  _showGanarModal() {
+    const ganador = this.participantes[this._winnerIdx];
+    const mensaje = `El feliz ganador es: ${ganador.nombre || ganador.label || '#' + ganador.numero}`;
+
+    // Crear confetti simple con canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = 360;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d');
+    const particles = [];
+    const coloresConfetti = ['#D4A017', '#16213F', '#E8B923', '#0B1229'];
+    for (let i = 0; i < 120; i++) {
+      const size = Math.random() * 8 + 4;
+      const x = Math.random() * 360;
+      const y = Math.random() * 360;
+      const color = coloresConfetti[Math.floor(Math.random() * coloresConfetti.length)];
+      const vx = (Math.random() - 0.5) * 20;
+      const vy = (Math.random() - 0.5) * 20;
+      particles.push({ x, y, size, vx, vy, color });
+    }
+    function animateConfetti() {
+      ctx.clearRect(0, 0, 360, 360);
+      particles.forEach(p => {
+        p.x += p.vx * 0.5;
+        p.y += p.vy * 0.5;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+      });
+      if (particles.some(p => p.x > 0 && p.x < 360 && p.y > 0 && p.y < 360)) {
+        requestAnimationFrame(animateConfetti);
+      }
+    }
+    animateConfetti();
+
+    // Modal grande con el ganador
+    const modalHtml = `
+      <div class="modal-popup" style="background:rgba(11,18,41,.92); padding:32px 24px; max-width:340px; margin:auto; border-radius:16px; text-align:center; color:#fff; position:fixed; top:0; left:0; right:0; bottom:0; z-index:1000; backdrop-filter:blur(4px);">
+        <div style="width:80px; height:80px; background:linear-gradient(135deg, #D4A017, #E8B923); border-radius:50%; margin:0 auto 24px; display:flex; align-items:center; justify-content:center; font-size:32px;">🏆</div>
+        <h2 style="margin:0 0 12px; font-size:22px;">¡Felicidades!</h2>
+        <p style="margin:0 0 24px; font-size:16px; line-height:1.4;">${mensaje}</p>
+        <button class="btn btn-gold" style="width:100%; padding:12px; font-size:14px; font-weight:700;">Aceptar</button>
+      </div>`;
+    document.getElementById('modal-root').innerHTML = modalHtml;
+    // Añadir estilos para el modal popup si no existen
+    const style = document.createElement('style');
+    style.innerHTML = `.modal-popup .btn{bbackground:#D4A017;color:#16213F;border:none;border-radius:8px;cursor:pointer;transition:background .2s}.modal-popup .btn:hover{background:#E8B923;}.modal-popup{& .btn:focus{outline:none}.modal-popup{z-index:1001;}}.confetti-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999;}`;
+    document.head.appendChild(style);
+
+    // Botón aceptar cierra el modal
+    const btn = modalHtml.querySelector('button');
+    btn.addEventListener('click', () => {
+      document.getElementById('modal-root').innerHTML = '';
+      document.head.querySelector('style').remove();
+      this._stopAllSounds();
+    });
   }
 }
 
