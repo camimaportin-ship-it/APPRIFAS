@@ -3301,7 +3301,7 @@ async function renderSorteoTab(rifa, box) {
             </select>
           </div>
         </div>
-        <p class="text-sm text-ink-600"><strong>Ruleta circular SIEMPRE</strong>: los <strong>nombres</strong> se escriben en <strong>rayos radiales</strong> (centro→borde, letras derechas con contorno), de modo que caben y son <strong>legibles con CUALQUIER cantidad de participantes</strong>: nunca se cortan ni se pisan (la rueda se agranda sola para mantener la letra). Los <strong>números</strong> de boleta aparecen en el <strong>banner lateral</strong>, que muestra en vivo (a alta velocidad) el nombre y número que está bajo la aguja. Las vueltas previas son <strong>demostraciones</strong> (RULETA X DE N) y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
+        <p class="text-sm text-ink-600"><strong>Ruleta circular SIEMPRE</strong> con diseño <strong>automático</strong>: con pocos participantes usa el <strong>doble anillo clásico</strong>, y con muchos cambia a <strong>rayos radiales</strong> (letra ~3x más grande). En ambos, los <strong>nombres completos</strong> en fuente Verdana con contorno (legible aun en pequeño) <strong>nunca se desbordan ni se pisan</strong>, y la rueda se agranda sola + se re-ajusta si cambias la ventana. Con los botones <strong>＋/－</strong> puedes acercar para leer cualquier nombre en grande. Los <strong>números</strong> de boleta aparecen en el <strong>banner lateral</strong>, que muestra en vivo el nombre y número bajo la aguja. Las vueltas previas son <strong>demostraciones</strong> (RULETA X DE N) y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
         <label class="check-row mt-2"><input type="checkbox" id="ruleta-manual" checked> <span>⏸️ <strong>Pausar entre giros:</strong> yo elijo el momento del siguiente giro para dar pausa y explicar cada resultado</span></label>
         <label class="check-row"><input type="checkbox" id="ruleta-tambor"> <span>🛢️ <strong>Usar tambor gigante (opcional):</strong> solo si prefieres el formato vertical de filas gigantes en lugar de la ruleta circular</span></label>`;
     }
@@ -3347,7 +3347,14 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
           </div>
           <div class="anim-layout">
             <div class="anim-canvas text-center">
-              <canvas id="canvas-ruleta" width="${tamano}" height="${tamano}" style="max-width:100%;"></canvas>
+              <div id="ruleta-zoomwrap" style="position:relative; display:inline-block; max-width:100%; overflow:auto;">
+                <canvas id="canvas-ruleta" width="${tamano}" height="${tamano}" style="max-width:100%;"></canvas>
+                <div id="ruleta-zoomctl" style="position:absolute; top:6px; right:6px; display:flex; gap:4px;">
+                  <button type="button" class="btn btn-outline btn-sm" id="ruleta-zoom-mas" title="Acercar (leer nombres)">＋</button>
+                  <button type="button" class="btn btn-outline btn-sm" id="ruleta-zoom-menos" title="Alejar">－</button>
+                  <button type="button" class="btn btn-outline btn-sm" id="ruleta-zoom-reset" title="Ver completa">⤾</button>
+                </div>
+              </div>
               <p class="text-sm text-ink-600 mt-2" id="ruleta-estado">Preparando el sorteo...</p>
             </div>
             <div class="anim-lado">
@@ -3396,6 +3403,36 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
       };
       const disp = fitEn(Math.floor(window.innerWidth - 56), Math.floor(window.innerHeight - 250), 260);
       rueda.cambiarTamano(disp.w, disp.h);
+
+      // Zoom +/−/reset (CSS transform: no afecta el video de evidencia) para
+      // leer cualquier nombre en grande + re-ajuste 100% responsive al redimensionar
+      let zoomNivel = 1;
+      const aplicarZoom = () => {
+        const cv = document.getElementById('canvas-ruleta');
+        if (cv) { cv.style.transform = `scale(${zoomNivel})`; cv.style.transformOrigin = 'center center'; }
+      };
+      const zm = document.getElementById('ruleta-zoom-mas');
+      const zn = document.getElementById('ruleta-zoom-menos');
+      const zr = document.getElementById('ruleta-zoom-reset');
+      if (zm) zm.addEventListener('click', () => { zoomNivel = Math.min(4, +(zoomNivel + 0.25).toFixed(2)); aplicarZoom(); });
+      if (zn) zn.addEventListener('click', () => { zoomNivel = Math.max(1, +(zoomNivel - 0.25).toFixed(2)); aplicarZoom(); });
+      if (zr) zr.addEventListener('click', () => { zoomNivel = 1; aplicarZoom(); });
+      let tRs = null;
+      const onRsRuleta = () => {
+        clearTimeout(tRs);
+        tRs = setTimeout(() => {
+          const ovAbierto = document.getElementById('ruleta-overlay');
+          if (ovAbierto) {
+            const f = fitEn(window.innerWidth - 32, window.innerHeight - 150, 300);
+            rueda.cambiarTamano(f.w, f.h);
+          } else {
+            const d = fitEn(Math.floor(window.innerWidth - 56), Math.floor(window.innerHeight - 250), 260);
+            disp.w = d.w; disp.h = d.h;
+            rueda.cambiarTamano(d.w, d.h);
+          }
+        }, 200);
+      };
+      window.addEventListener('resize', onRsRuleta);
       const resultado = await api('/rifas/' + rifa.id + '/sortear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const manualChk = document.getElementById('ruleta-manual');
       const manual = !manualChk || manualChk.checked;
@@ -3414,21 +3451,23 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
         btn.addEventListener('click', () => { btn.remove(); resolve(); });
       });
 
-      // Pantalla completa: mueve el mismo canvas (y el banner) a un overlay para maximizarlos
+      // Pantalla completa: mueve el mismo canvas (con sus controles de zoom y el banner) a un overlay
       const btnFs = document.getElementById('btn-ruleta-fullscreen');
       if (btnFs) btnFs.addEventListener('click', () => {
+        const zoomwrap = document.getElementById('ruleta-zoomwrap');
         const canvas = document.getElementById('canvas-ruleta');
-        const contenedor = canvas.closest('.anim-canvas');
+        const contenedor = zoomwrap ? zoomwrap.closest('.anim-canvas') : canvas.closest('.anim-canvas');
         const banner = document.getElementById('ruleta-banner');
         const contBanner = banner ? banner.parentNode : null;
         const ov = document.createElement('div');
+        ov.id = 'ruleta-overlay';
         ov.style.cssText = 'position:fixed;inset:0;background:#0B1229;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2400;padding:14px;overflow:auto;';
         ov.innerHTML = `<p style="color:#E8B923;font-weight:700;margin:0 0 8px;text-align:center;">🎡 Sorteo en pantalla completa</p>`;
         const span = document.createElement('span');
-        span.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;';
+        span.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;max-width:100%;max-height:100%;overflow:auto;';
         ov.appendChild(span);
         if (banner) span.appendChild(banner);
-        span.appendChild(canvas);
+        if (zoomwrap) span.appendChild(zoomwrap); else span.appendChild(canvas);
         const btnSalir = document.createElement('button');
         btnSalir.className = 'btn btn-gold';
         btnSalir.style.marginTop = '12px';
@@ -3436,7 +3475,7 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
         btnSalir.addEventListener('click', () => {
           ov.remove();
           if (banner && contBanner) { banner.remove(); contBanner.appendChild(banner); }
-          contenedor.appendChild(canvas);
+          if (zoomwrap) contenedor.appendChild(zoomwrap); else contenedor.appendChild(canvas);
           canvas.style.maxWidth = '';
           canvas.style.width = '';
           canvas.style.height = '';
@@ -3453,6 +3492,9 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
       });
 
       const videoUrl = await rueda.girarMultiples(resultado.ganadores[0].numero, { vueltas, duracionMs: duracionSeg * 1000, manual, onEsperaContinuar });
+      window.removeEventListener('resize', onRsRuleta);
+      const ovAbierta = document.getElementById('ruleta-overlay');
+      if (ovAbierta) ovAbierta.remove();
       const filaGanadora = document.querySelector(`#area-sorteo [data-numero="${etiquetar(resultado.ganadores[0].numero)}"]`);
       if (filaGanadora) filaGanadora.classList.add('ganador');
       mostrarResultadoSorteo(rifa, resultado, videoUrl);

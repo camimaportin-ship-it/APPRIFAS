@@ -5,13 +5,14 @@
  * lo determina el backend (server.js) con la "semilla aleatoria" guardada en la
  * tabla `ganadores`. Esta vista es la capa VISUAL que aterriza en ese ganador.
  *
- * FORMATO: RULETA CIRCULAR SIEMPRE.
- *  - Los nombres se escriben en "RAYOS RADIALES" (en dirección del centro al
- *    borde, letra por letra y con las letras SIEMPRE derechas). Así caben con
- *    CUALQUIER cantidad de participantes: el único límite es el ancho de una
- *    letra por sector, por lo que los nombres NUNCA se cortan ni se pisan.
- *    La fuente crece/shrink en función de la cantidad (física de un disco) y el
- *    canvas se agranda automáticamente para mantener letra legible.
+ * FORMATO: RULETA CIRCULAR SIEMPRE, con diseño AUTOMÁTICO según lo que quepa:
+ *  - Pocos participantes: DOBLE ANILLO tangencial estilo clásico (letras
+ *    derechas en Verdana, pares afuera e impares adentro, cada nombre en el
+ *    arco de 2 sectores).
+ *  - Muchos participantes: RAYOS RADIALES (el nombre usa todo el radio, letra
+ *    ~3x más grande que en tangencial).
+ *  En ambos los nombres van COMPLETOS (solo el nombre, sin "#"), con contorno
+ *  oscuro y ajuste garantizado: NUNCA se desbordan ni se pisan.
  *  - El TAMBOR vertical (gigantón, con filas GIGANTES de número + nombre) queda
  *    como MODO OPCIONAL activable por el organizador, no automático.
  *
@@ -82,8 +83,9 @@ class RuletaCanvas {
 
     this._maxNameLen = Math.max(1, ...this.participantes.map(p => String(p.nombre || '').length), 1);
     this._maxName = this.participantes.reduce((a, p) => (String(p.nombre || '').length > String(a || '').length ? p.nombre : a), '');
-    // Los rayos llevan SOLO el nombre (sin "#0001"): el número va en el banner lateral y la lista
-    this._maxTotalChars = Math.max(1, ...this.participantes.map(p => String(p.nombre || '—').length));
+    // Longitud del nombre más largo por anillo (par = exterior, impar = interior)
+    this._maxLenPar = Math.max(1, ...this.participantes.filter((_, i) => i % 2 === 0).map(p => String(p.nombre || '—').length));
+    this._maxLenImpar = Math.max(1, ...this.participantes.filter((_, i) => i % 2 === 1).map(p => String(p.nombre || '—').length));
     // Título del núcleo central (nombre de la rifa); ya NO se muestra el contador
     this.titulo = String((this.opts && this.opts.titulo) || '🎡 SORTEO');
 
@@ -243,24 +245,53 @@ class RuletaCanvas {
   }
 
   _tamanoCircular() {
-    // Tamaño W=H para que los rayos radiales queden legibles con CUALQUIER
-    // cantidad y con nombres largos: el radio crece con n Y con el nombre más
-    // largo (la fuente base queda ~14px+ incluso con 150+).
+    // Tamaño W=H para que los nombres de AMBOS anillos queden legibles con
+    // CUALQUIER cantidad y con nombres largos: el radio crece con n Y con el
+    // nombre más largo (el anillo interior manda en el tamaño).
     const n = Math.max(this.participantes.length, 1);
-    const R = Math.max(4.5 * n, 50 * this._maxTotalChars) * 1.05;
-    return Math.min(1650, Math.max(360, Math.round(R * 2 + 4)));
+    const T = Math.max(this._maxLenPar, this._maxLenImpar, 1);
+    const R = Math.max(4.5 * n, 1.5 * n * T) * 1.02;
+    return Math.min(2200, Math.max(420, Math.round(R * 2 + 4)));
   }
 
   // ==================== RULETA CIRCULAR (siempre) ===========================
+  // Diseño clásico de DOBLE ANILLO tangencial:
+  //  - Cada nombre se escribe HORIZONTAL (letras derechas) siguiendo el arco de
+  //    su anillo. Pares en el anillo exterior, impares en el interior.
+  //  - Cada nombre ocupa el arco de 2 sectores, así los vecinos del mismo
+  //    anillo NUNCA se tocan. La fuente se calcula con el nombre más largo de
+  //    cada anillo + un ajuste por nombre: IMPOSIBLE que se desborde.
+  //  - Fuente Verdana: diseñada para leerse bien incluso en tamaño pequeño.
 
-  /** Fuente para los rayos radiales: limitada por el arco (ancho de 1 letra por sector). */
+  _fuenteAnillos(radio) {
+    const n = Math.max(this.participantes.length, 1);
+    const ang = (2 * Math.PI) / n;
+    const slotSec = n === 1 ? 1 : 2;
+    const rOut = radio * 0.79, rIn = radio * 0.485;
+    const arcOut = slotSec * ang * rOut, arcIn = slotSec * ang * rIn;
+    const rawOut = Math.min((radio * 0.28) * 0.78, (arcOut * 0.96) / (Math.max(this._maxLenPar, 1) * 0.62), 64);
+    const rawIn = Math.min((radio * 0.27) * 0.78, (arcIn * 0.96) / (Math.max(this._maxLenImpar, 1) * 0.62), 64);
+    return { Fout: Math.max(1, Math.floor(rawOut)), Fin: Math.max(1, Math.floor(rawIn)), rawOut, rawIn, rOut, rIn, slotSec, ang };
+  }
+
+  /** Fuente para los rayos radiales (muchos participantes): el nombre usa todo
+   *  el radio, así la letra queda ~3x más grande que en tangencial y NUNCA se
+   *  corta. Sin piso mínimo forzado: la geometría garantiza cero desborde. */
   _fuenteRayos(radio) {
     const n = Math.max(this.participantes.length, 1);
     const rIn = radio * 0.44;
     const arco = rIn * ((2 * Math.PI) / n);
-    const Ftan = Math.floor((arco * 0.90) / 0.80);          // ancho tangencial de 1 letra
-    const Frad = Math.floor(((radio * 0.96) - rIn) / (this._maxTotalChars * 0.95)); // largo radial
-    return Math.max(7, Math.min(46, Ftan, Frad));
+    const T = Math.max(this._maxLenPar, this._maxLenImpar, 1);
+    const Ftan = (arco * 0.90) / 0.80;
+    const Frad = ((radio * 0.96) - rIn) / (T * 0.95);
+    return Math.max(1, Math.min(64, Ftan, Frad));
+  }
+
+  /** Elige el diseño según lo que QUEPA legible: anillos clásicos si ambos
+   *  dan letra ≥12px, si no rayos radiales. Siempre circular. */
+  _elegirDiseno(radio) {
+    const { rawOut, rawIn } = this._fuenteAnillos(radio);
+    return (rawOut >= 12 && rawIn >= 12) ? 'anillos' : 'rayos';
   }
 
   _bake() {
@@ -270,8 +301,11 @@ class RuletaCanvas {
     const radio = this._radio();
     const n = Math.max(this.participantes.length, 1);
     const anguloSegmento = (2 * Math.PI) / n;
-    const F = this._fuenteRayos(radio);
-    const rIn = radio * 0.44;
+    const { Fout, Fin, rOut, rIn: rInAn, slotSec } = this._fuenteAnillos(radio);
+    const diseno = this._elegirDiseno(radio);
+    const FRayos = diseno === 'rayos' ? this._fuenteRayos(radio) : 0;
+    const rInRa = radio * 0.44;
+    const FONT = (F) => 'bold ' + F + 'px Verdana, "DejaVu Sans", "Segoe UI", Roboto, sans-serif';
 
     const off = document.createElement('canvas');
     off.width = W;
@@ -281,48 +315,94 @@ class RuletaCanvas {
     this.participantes.forEach((p, i) => {
       const inicio = i * anguloSegmento;
       const fin = inicio + anguloSegmento;
-      const esGanador = this._mostrarGanador && i === this._winnerIdx;
+      const esGanador = this._mostrarGanador && Math.floor(i / 2) === Math.floor(this._winnerIdx / 2);
 
-      // Sector (cuña) alternando colores
+      // Sector (cuña) con colores por PAREJAS para que cada nombre tenga fondo uniforme
       o.beginPath();
       o.moveTo(cx, cy);
       o.arc(cx, cy, radio, inicio, fin);
       o.closePath();
-      o.fillStyle = esGanador ? '#9A6B00' : this.colores[i % this.colores.length];
+      o.fillStyle = esGanador ? '#9A6B00' : this.colores[Math.floor(i / 2) % this.colores.length];
       o.fill();
       o.strokeStyle = esGanador ? '#E8B923' : '#F5F6F9';
       o.lineWidth = esGanador ? 5 : 2;
       o.stroke();
 
-      // Raya separadora desde el borde interior hasta el aro
-      const mid = inicio + anguloSegmento / 2;
-      o.beginPath();
-      o.moveTo(cx + Math.cos(inicio) * rIn, cy + Math.sin(inicio) * rIn);
-      o.lineTo(cx + Math.cos(inicio) * (radio - 3), cy + Math.sin(inicio) * (radio - 3));
-      o.strokeStyle = 'rgba(245,246,249,.45)';
-      o.lineWidth = 1;
-      o.stroke();
-
-      // Nombre en RAYO RADIAL: SOLO el nombre, letra por letra hacia afuera,
-      // letras SIEMPRE derechas y con contorno oscuro para máxima legibilidad
-      const texto = String(p.nombre || '—');
-      o.font = 'bold ' + F + 'px Sora, sans-serif';
-      o.textAlign = 'center';
-      o.textBaseline = 'middle';
-      o.lineWidth = Math.max(2, Math.round(F * 0.18));
-      o.strokeStyle = 'rgba(11,18,41,.9)';
-      for (let k = 0; k < texto.length; k++) {
-        const r = rIn + k * F * 0.95 + F * 0.5;
-        const x = Math.round(cx + Math.cos(mid) * r);
-        const y = Math.round(cy + Math.sin(mid) * r);
-        const ch = texto.charAt(k);
-        o.strokeText(ch, x, y);
-        o.fillStyle = esGanador ? '#fff' : 'rgba(255,255,255,.98)';
-        o.fillText(ch, x, y);
+      // Nombre según el diseño elegido (SOLO el nombre, sin "#"):
+      //  - anillos: horizontal siguiendo el arco de su anillo (par = exterior)
+      //  - rayos: letra por letra del centro al borde (muchos participantes)
+      // Letras derechas, Verdana, contorno oscuro. Cero desborde garantizado.
+      if (diseno === 'anillos') {
+        const par = i % 2 === 0;
+        const ringR = par ? rOut : rInAn;
+        const F = par ? Fout : Fin;
+        let texto = String(p.nombre || '—');
+        const slotArc = slotSec * anguloSegmento * ringR;
+        const maxSpan = slotArc * 0.96;
+        if ((texto.length * F * 0.62) > maxSpan) {
+          const caben = Math.max(1, Math.floor(maxSpan / (F * 0.62)) - 1);
+          texto = texto.slice(0, caben) + '…';
+        }
+        const centro = (i + slotSec / 2) * anguloSegmento;
+        const pasoAng = (F * 0.60) / ringR;
+        const angIni = centro - ((texto.length - 1) * pasoAng) / 2;
+        o.font = FONT(F);
+        o.textAlign = 'center';
+        o.textBaseline = 'middle';
+        o.lineWidth = Math.max(1, Math.round(F * 0.20));
+        o.strokeStyle = 'rgba(11,18,41,.92)';
+        for (let k = 0; k < texto.length; k++) {
+          const a = angIni + k * pasoAng;
+          const x = Math.round(cx + Math.cos(a) * ringR);
+          const y = Math.round(cy + Math.sin(a) * ringR);
+          const ch = texto.charAt(k);
+          o.strokeText(ch, x, y);
+          o.fillStyle = esGanador ? '#fff' : 'rgba(255,255,255,.98)';
+          o.fillText(ch, x, y);
+        }
+      } else {
+        const mid = inicio + anguloSegmento / 2;
+        const F = FRayos;
+        const texto = String(p.nombre || '—');
+        o.font = FONT(F);
+        o.textAlign = 'center';
+        o.textBaseline = 'middle';
+        o.lineWidth = Math.max(1, Math.round(F * 0.20));
+        o.strokeStyle = 'rgba(11,18,41,.92)';
+        for (let k = 0; k < texto.length; k++) {
+          const r = rInRa + k * F * 0.95 + F * 0.5;
+          const x = Math.round(cx + Math.cos(mid) * r);
+          const y = Math.round(cy + Math.sin(mid) * r);
+          const ch = texto.charAt(k);
+          o.strokeText(ch, x, y);
+          o.fillStyle = esGanador ? '#fff' : 'rgba(255,255,255,.98)';
+          o.fillText(ch, x, y);
+        }
       }
     });
 
-    // Aro dorado exterior
+    if (diseno === 'anillos') {
+      // Separadores de anillos
+      [0.34, 0.63].forEach(fr => {
+        o.beginPath();
+        o.arc(cx, cy, radio * fr, 0, Math.PI * 2);
+        o.strokeStyle = 'rgba(245,246,249,.35)';
+        o.lineWidth = 1.5;
+        o.stroke();
+      });
+    } else {
+      // Rayas separadoras radiales desde el núcleo hasta el aro
+      const P = Math.max(this.participantes.length, 1);
+      for (let j = 0; j < P; j++) {
+        const a = j * anguloSegmento;
+        o.beginPath();
+        o.moveTo(cx + Math.cos(a) * radio * 0.34, cy + Math.sin(a) * radio * 0.34);
+        o.lineTo(cx + Math.cos(a) * (radio - 3), cy + Math.sin(a) * (radio - 3));
+        o.strokeStyle = 'rgba(245,246,249,.35)';
+        o.lineWidth = 1.5;
+        o.stroke();
+      }
+    }
     o.beginPath();
     o.arc(cx, cy, radio - 2, 0, Math.PI * 2);
     o.strokeStyle = 'rgba(212,160,23,.55)';
@@ -411,7 +491,7 @@ class RuletaCanvas {
       ctx.clip();
       let nombre = String(p.nombre || '—');
       if (nombre.length > nameMaxChars) nombre = nombre.slice(0, nameMaxChars - 1) + '…';
-      ctx.font = 'bold ' + F + 'px Sora, sans-serif';
+      ctx.font = 'bold ' + F + 'px Verdana, "DejaVu Sans", "Segoe UI", sans-serif';
       ctx.fillStyle = '#fff';
       ctx.fillText(nombre, 24 + numW, y + rowH / 2);
       ctx.restore();
@@ -490,7 +570,7 @@ class RuletaCanvas {
     ctx.save();
 
     // Núcleo decorativo FIJO (no rota con la rueda): nombre de la rifa
-    const rIn = radio * 0.44;
+    const rIn = radio * 0.32;
     const hubR = rIn - 6;
     ctx.beginPath();
     ctx.arc(cx, cy, hubR, 0, Math.PI * 2);
@@ -514,7 +594,7 @@ class RuletaCanvas {
     if (cur && lineas.length < 3) lineas.push(cur.length > charsHub ? cur.slice(0, charsHub - 1) + '…' : cur);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold ' + fHub + 'px Sora, sans-serif';
+    ctx.font = 'bold ' + fHub + 'px Verdana, "DejaVu Sans", "Segoe UI", sans-serif';
     ctx.fillStyle = '#E8B923';
     const paso = Math.round(fHub * 1.25);
     const y0 = cy - Math.round((lineas.length - 1) * paso / 2);
@@ -527,7 +607,7 @@ class RuletaCanvas {
       ctx.fillStyle = 'rgba(11,18,41,.72)';
       ctx.fillRect(cx - 92, cy - radio + 26, 184, 30);
       ctx.fillStyle = '#E8B923';
-      ctx.font = 'bold 13px Sora, sans-serif';
+      ctx.font = 'bold 13px Verdana, "DejaVu Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(txt.slice(0, 32), cx, cy - radio + 45);
     }
