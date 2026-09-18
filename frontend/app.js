@@ -922,8 +922,11 @@ function renderFormularioRifa(rifa) {
       <span class="hint">En "A elección" el comprador ve la grilla 10×10 (verdes = disponibles, rojas = vendidas) y escoge su boleta.</span>
     </div>
 
+    <div id="campo-cantidad-ilimitada" style="display:none;">
+      <label class="check-row mb-2"><input type="checkbox" id="chk-cantidad-ilimitada" ${(v.cantidad_ilimitada || v.cantidad_max_participantes === 0) ? 'checked' : ''}> <span>📈 <strong>Cantidad ilimitada</strong> — se define cuántos participantes al momento del sorteo</span></label>
+    </div>
     <div class="grid-3">
-      <div class="field">
+      <div class="field" id="campo-cantidad-max">
         <label>Cantidad máxima de participantes</label>
         <input class="input" name="cantidad_max_participantes" type="number" min="1" required value="${v.cantidad_max_participantes || 100}" ${v.modalidad_boleta === 'CUATRO_OPORTUNIDADES' || v.modalidad_boleta === 'CHANCE_CON_SIMBOLO' ? 'disabled' : ''}>
       </div>
@@ -1151,11 +1154,44 @@ function bindFormularioRifa(rifa) {
     campoHora.style.display = esVirtual ? 'block' : 'none';
     const inputHora = campoHora.querySelector('input[name=hora_sorteo]');
     if (inputHora) inputHora.required = esVirtual;
+
+    // "Cantidad ilimitada" solo para Ruleta en vivo con boleta normal
+    const campoIlimitada = document.getElementById('campo-cantidad-ilimitada');
+    const campoCantidadMax = document.getElementById('campo-cantidad-max');
+    const chkIlimitada = document.getElementById('chk-cantidad-ilimitada');
+    const inputCantidad = form.querySelector('input[name=cantidad_max_participantes]');
+    const ilimitadaVisible = esVirtual && !modalidadNoIlimitada();
+    if (campoIlimitada) campoIlimitada.style.display = ilimitadaVisible ? 'block' : 'none';
+    if (campoIlimitada && !ilimitadaVisible && chkIlimitada) chkIlimitada.checked = false;
+    aplicarIlimitada();
+  };
+  const modalidadNoIlimitada = () => {
+    const m = form.querySelector('#modalidad-boleta').value;
+    return ['CUATRO_OPORTUNIDADES', 'CHANCE_CON_SIMBOLO', 'CHANCE_3_GANADORES', 'CHANCE_INDIVIDUAL', 'OPORTUNIDADES_4D'].includes(m);
+  };
+  const aplicarIlimitada = () => {
+    const chkIlimitada = document.getElementById('chk-cantidad-ilimitada');
+    const campoCantidadMax = document.getElementById('campo-cantidad-max');
+    const inputCantidad = form.querySelector('input[name=cantidad_max_participantes]');
+    if (!chkIlimitada || !inputCantidad) return;
+    const campoVisible = document.getElementById('campo-cantidad-ilimitada');
+    const visible = campoVisible && campoVisible.style.display !== 'none';
+    if (!visible) return; // Chance/CUATRO/OPORTUNIDADES 4D: la deshabilitación la controla aplicarModalidad
+    const on = chkIlimitada.checked;
+    if (campoCantidadMax) campoCantidadMax.style.opacity = on ? '.45' : '1';
+    inputCantidad.disabled = on;
+    if (on) inputCantidad.value = '0';
+    else if (!Number(inputCantidad.value)) inputCantidad.value = '100';
   };
   if (selTipo) {
     aplicarHora();
     selTipo.addEventListener('change', aplicarHora);
   }
+  const chkIlimitada = document.getElementById('chk-cantidad-ilimitada');
+  if (chkIlimitada) chkIlimitada.addEventListener('change', aplicarIlimitada);
+  const selModalidadForm = form.querySelector('#modalidad-boleta');
+  if (selModalidadForm) selModalidadForm.addEventListener('change', aplicarHora);
+  aplicarHora();
 
   // Cajas de upload -> abren el input file oculto y muestran preview
   ['imagen_producto', 'banner_empresa'].forEach(campo => {
@@ -1206,6 +1242,9 @@ function bindFormularioRifa(rifa) {
       fd.set('rango_max', fd.get('rango_max') || '99');
       fd.set('cantidad_max_participantes', fd.get('cantidad_max_participantes') || '100');
     }
+    // Cantidad ilimitada (Ruleta en vivo): forzar 0 (sin límite)
+    const chkIlimitadaSubmit = document.getElementById('chk-cantidad-ilimitada');
+    if (chkIlimitadaSubmit && chkIlimitadaSubmit.checked) fd.set('cantidad_max_participantes', '0');
     // Si la auto-liberación está deshabilitada, forzar 0 (el input deshabilitado no viaja en FormData)
     if (chkAuto && !chkAuto.checked) fd.set('auto_liberar_horas', '0');
     // Modalidad 50/50
@@ -3162,7 +3201,31 @@ async function renderSorteoTab(rifa, box) {
         <div class="field"><label>Rango hasta</label><input class="input" id="tapazo-max" type="number" value="${rifa.rango_max}"></div>
       </div>`;
     } else {
-      cfg.innerHTML = `<p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado y grabará un video de evidencia.</p>`;
+      cfg.innerHTML = `
+        <div class="grid-3">
+          <div class="field">
+            <label>Tamaño de la ruleta</label>
+            <select class="input" id="ruleta-tamano">
+              <option value="360">Pequeña (360px)</option>
+              <option value="500" selected>Mediana (500px)</option>
+              <option value="700">Grande (700px)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tiempo de giro (segundos)</label>
+            <input class="input" id="ruleta-duracion" type="number" min="3" max="15" step="1" value="6">
+          </div>
+          <div class="field">
+            <label>Número de giros</label>
+            <select class="input" id="ruleta-vueltas">
+              <option value="1">1 (sin demostración)</option>
+              <option value="2">2 (1 demo + definitiva)</option>
+              <option value="3" selected>3 (2 demos + definitiva)</option>
+              <option value="5">5 (4 demos + definitiva)</option>
+            </select>
+          </div>
+        </div>
+        <p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado. Las primeras vueltas son <strong>demostraciones</strong> (prueban que el sistema es 100% al azar); la <strong>última</strong> es la definitiva y elige al ganador. Se grabará un video de evidencia. 💻 Abre <strong>Pantalla completa</strong> durante el sorteo para ver los nombres sin importar cuántos participantes haya.</p>`;
     }
   };
   sel.addEventListener('change', renderConfig);
@@ -3188,6 +3251,9 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
 
   try {
     if (modalidad === 'ruleta') {
+      const tamano = Number((document.getElementById('ruleta-tamano') || {}).value || 500);
+      const duracionSeg = Number((document.getElementById('ruleta-duracion') || {}).value || 6);
+      const vueltas = Number((document.getElementById('ruleta-vueltas') || {}).value || 1);
       const etiquetar = (n) => {
         const m = rifa.modalidad_boleta;
         if (m === 'OPORTUNIDADES_4D' || (m === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4)) return String(n).padStart(4, '0');
@@ -3196,10 +3262,14 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
       const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span class="mono">#${etiquetar(p.numero)}</span><span>${escapeHtml(p.nombre || '')}</span></li>`).join('');
       area.innerHTML = `
         <div class="card card-pad">
+          <div class="flex justify-between items-center mb-2" style="flex-wrap:wrap; gap:8px;">
+            <h4 style="margin:0;">🎡 ${vueltas > 1 ? `${vueltas} giros · demos primero` : 'Sorteo en vivo'}</h4>
+            <button class="btn btn-outline btn-sm" id="btn-ruleta-fullscreen" type="button">⛶ Pantalla completa</button>
+          </div>
           <div class="anim-layout">
             <div class="anim-canvas text-center">
-              <canvas id="canvas-ruleta" width="360" height="360" style="max-width:100%;"></canvas>
-              <p class="text-sm text-ink-600 mt-2">Girando y grabando evidencia...</p>
+              <canvas id="canvas-ruleta" width="${tamano}" height="${tamano}" style="max-width:100%;"></canvas>
+              <p class="text-sm text-ink-600 mt-2" id="ruleta-estado">Girando y grabando evidencia...</p>
             </div>
             <div class="anim-lista">
               <h4>Participantes (${pagados.length})</h4>
@@ -3207,9 +3277,46 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
             </div>
           </div>
         </div>`;
-      const rueda = new RuletaCanvas(document.getElementById('canvas-ruleta'), pagados.map(p => ({ numero: p.numero, nombre: p.nombre, label: etiquetar(p.numero) })));
+      const rueda = new RuletaCanvas(document.getElementById('canvas-ruleta'), pagados.map(p => ({ numero: p.numero, nombre: p.nombre, label: etiquetar(p.numero) })), {
+        onEstado: (txt) => { const el = document.getElementById('ruleta-estado'); if (el) el.textContent = txt; },
+        onGanador: () => {
+          const fg = document.querySelector(`#area-sorteo [data-numero="${etiquetar(resultado.ganadores[0].numero)}"]`);
+          if (fg) fg.classList.add('ganador');
+        }
+      });
       const resultado = await api('/rifas/' + rifa.id + '/sortear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const videoUrl = await rueda.girarHasta(resultado.ganadores[0].numero);
+
+      // Pantalla completa: mueve el mismo canvas a un overlay para maximizarlo
+      const btnFs = document.getElementById('btn-ruleta-fullscreen');
+      if (btnFs) btnFs.addEventListener('click', () => {
+        const canvas = document.getElementById('canvas-ruleta');
+        const contenedor = canvas.closest('.anim-canvas');
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:#0B1229;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2400;';
+        ov.innerHTML = `<p style="color:#E8B923;font-weight:700;margin:0 0 6px;">🎡 Sorteo en pantalla completa</p>`;
+        const span = document.createElement('span');
+        ov.appendChild(span);
+        span.appendChild(canvas);
+        canvas.style.maxWidth = '94vw';
+        canvas.style.height = 'auto';
+        const btnSalir = document.createElement('button');
+        btnSalir.className = 'btn btn-gold';
+        btnSalir.style.marginTop = '10px';
+        btnSalir.textContent = '✕ Salir de pantalla completa';
+        btnSalir.addEventListener('click', () => {
+          ov.remove();
+          contenedor.appendChild(canvas);
+          canvas.style.maxWidth = '';
+          canvas.style.height = '';
+          rueda.cambiarTamano(tamano, tamano);
+        });
+        ov.appendChild(btnSalir);
+        document.body.appendChild(ov);
+        const nuevoTam = Math.min(window.innerWidth - 60, window.innerHeight - 120, 1200);
+        rueda.cambiarTamano(nuevoTam, nuevoTam);
+      });
+
+      const videoUrl = await rueda.girarMultiples(resultado.ganadores[0].numero, { vueltas, duracionMs: duracionSeg * 1000 });
       const filaGanadora = document.querySelector(`#area-sorteo [data-numero="${etiquetar(resultado.ganadores[0].numero)}"]`);
       if (filaGanadora) filaGanadora.classList.add('ganador');
       mostrarResultadoSorteo(rifa, resultado, videoUrl);

@@ -903,7 +903,10 @@ function calcularDashboard(rifaId, rifaCache) {
     const grupos = asegurarGrupos(rifa);
     quedan = estadosGruposBulk(rifa, grupos).filter(e => e.estado === 'libre').length;
   } else {
-    quedan = Math.max(0, rifa.cantidad_max_participantes - vendidos);
+    const limite = rifa.cantidad_max_participantes === 0
+      ? (rifa.rango_max - rifa.rango_min + 1)
+      : rifa.cantidad_max_participantes;
+    quedan = Math.max(0, limite - vendidos);
   }
   return { rifa, totalNumeros, pagados, pendientes, vendidos, recaudado, potencial, porcentaje, quedan };
 }
@@ -1268,7 +1271,8 @@ app.post('/api/rifas', upload.fields([{ name: 'imagen_producto' }, { name: 'bann
     if (!b.nombre || !b.valor_boleta || !b.producto || !b.fecha_sorteo || isNaN(rango_max)) {
       return res.status(400).json({ error: 'Faltan campos obligatorios: nombre, valor_boleta, producto, fecha_sorteo, rango_numeros' });
     }
-    if (!chance && !esMultiples && (rango_max - rango_min + 1) < cantidad_max_participantes) {
+    // cantidad_max_participantes = 0 significa "Ilmitada" (Ruleta en vivo): se define al sortear
+    if (!chance && !esMultiples && cantidad_max_participantes > 0 && (rango_max - rango_min + 1) < cantidad_max_participantes) {
       return res.status(400).json({ error: 'El rango de números es menor a la cantidad máxima de participantes' });
     }
 
@@ -1681,7 +1685,9 @@ app.post('/api/rifas/:id/participantes', (req, res) => {
   const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
   const chance = esChance(rifa);
   const nOport = nOportunidades(rifa);
-  const maxBoletas = esCuatro ? (100 / nOport) : rifa.cantidad_max_participantes;
+  // cantidad_max_participantes === 0 = "Ilimitada" (Ruleta en vivo): el límite real es el rango de números
+  const maxBoletasBase = rifa.cantidad_max_participantes === 0 ? (rifa.rango_max - rifa.rango_min + 1) : rifa.cantidad_max_participantes;
+  const maxBoletas = esCuatro ? (100 / nOport) : maxBoletasBase;
 
   // Al iniciar el sorteo (cerrada) o tras sortear se bloquean las ventas
   if (rifa.estado === 'cerrada' || rifa.estado === 'sorteada') {
@@ -1832,7 +1838,8 @@ app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
   const chance = esChance(rifa);
   const nOport = nOportunidades(rifa);
   const numsPorBoleta = esCuatro ? nOport : 1;
-  const maxBoletas = esCuatro ? (100 / nOport) : rifa.cantidad_max_participantes;
+  // Cantidad ilimitada → el límite real es el rango de números
+  const maxBoletas = esCuatro ? (100 / nOport) : (rifa.cantidad_max_participantes === 0 ? (rifa.rango_max - rifa.rango_min + 1) : rifa.cantidad_max_participantes);
 
   if (rifa.estado === 'cerrada' || rifa.estado === 'sorteada') {
     return res.status(409).json({ error: rifa.estado === 'sorteada' ? 'Esta rifa ya fue sorteada' : 'Las ventas están bloqueadas: el sorteo ya inició' });
