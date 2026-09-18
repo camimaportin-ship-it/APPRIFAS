@@ -1,20 +1,20 @@
 /**
  * RuletaCanvas.js
  * -----------------------------------------------------------------------------
- * Ruleta de sorteo dibujada en <canvas>. IMPORTANTE sobre transparencia:
- * el GANADOR real siempre lo determina el backend (server.js) usando la
- * "semilla aleatoria" guardada en la tabla `ganadores`. Esta ruleta es la
- * capa VISUAL: recibe el número ganador ya decidido y gira hasta detenerse
- * exactamente en ese número, para que el video grabado sea una animación
- * honesta del resultado real (no una ruleta que decide por su cuenta).
+ * Ruleta de sorteo dibujada en <canvas>. TRANSPARENCIA: el GANADOR real siempre
+ * lo determina el backend (server.js) con la "semilla aleatoria" guardada en la
+ * tabla `ganadores`. Esta ruleta es la capa VISUAL: recibe el número ganador ya
+ * decidido y aterriza exactamente ahí, grabando un video de evidencia honesto.
  *
  * Características:
- *  - Giro único o múltiples giros (demos + vuelta definitiva).
- *  - Tamaño configurable y modo pantalla completa.
- *  - Easing de desaceleración dramática (quintic ease-out).
- *  - Efectos de sonido Web Audio API: giro, ticks, ding de celebración.
- *  - Modal del ganador con confeti al terminar.
- *  - Grabación de la animación como video de evidencia (.webm).
+ *  - Giro único o múltiples vueltas: las N-1 primeras son DEMOSTRACIONES que
+ *    revelan al "ganador del momento", y la última es "LA QUE DEFINE EL GANADOR".
+ *  - NOMBRES SIEMPRE VISIBLES: el dibujo adapta el tamaño de fuente al radio y a
+ *    la cantidad de participantes (auto-tamaño recomendado para garantizar
+ *    legibilidad sin desbordarse ni invadir otros sectores).
+ *  - Sonido estilo ruleta real: zumbido de aire (ruido filtrado) + tono grave,
+ *    con un "clack" de madera en cada cambio de sector (acelera y frena solo).
+ *  - Modal de ganador con confeti al terminar y grabación de video (.webm).
  * -----------------------------------------------------------------------------
  */
 class RuletaCanvas {
@@ -22,8 +22,9 @@ class RuletaCanvas {
    * @param {HTMLCanvasElement} canvas
    * @param {Array<{numero:number, nombre:string, label?:string}>} participantes - solo pagados
    * @param {Object} [opts]
-   * @param {Function} [opts.onEstado] - callback(texto) para actualizar la UI del estado
-   * @param {Function} [opts.onGanador] - callback() al revelar al ganador
+   * @param {Function} [opts.onEstado] - callback(texto) para la UI de estado
+   * @param {Function} [opts.onMomento] - callback(participante, idxVuelta, totalVueltas, esDefinitiva) al revelar un resultado del momento
+   * @param {Function} [opts.onGanador] - callback() al revelar al ganador definitivo
    */
   constructor(canvas, participantes, opts) {
     this.canvas = canvas;
@@ -31,6 +32,7 @@ class RuletaCanvas {
     this.participantes = participantes || [];
     this.opts = opts || {};
     this.onEstado = this.opts.onEstado || null;
+    this.onMomento = this.opts.onMomento || null;
     this.onGanador = this.opts.onGanador || null;
     this.anguloActual = 0;
     this.colores = ['#0B1229', '#16213F', '#D4A017', '#E8B923'];
@@ -41,74 +43,101 @@ class RuletaCanvas {
     this._winnerIdx = -1;
     this._mostrarGanador = false;
     this._raf = null;
+
+    // Audio: contexto + buffer de ruido blanco para el "aire" y los golpes
     this._audioContext = null;
     this._audioEnabled = false;
+    this._noiseBuf = null;
     this._tickPlaying = false;
+    this._airSource = null;
+    this._airFilter = null;
+    this._airGain = null;
     this._spinOsc = null;
     this._spinGain = null;
-    this._spinLfo = null;
-    this._lfoAmp = null;
+    this._initAudio();
+
+    this._maxNameLen = Math.max(1, ...this.participantes.map(p => String(p.nombre || '').length), 1);
+    this._maxName = this.participantes.reduce((a, p) => (String(p.nombre || '').length > String(a || '').length ? p.nombre : a), '');
+
     this._bake();
     this.dibujar();
-    this._initAudio();
   }
+
+  // ============================== AUDIO =====================================
 
   _initAudio() {
-    try { this._audioContext = new (window.AudioContext || window.webkitAudioContext)(); this._audioEnabled = true; } catch (e) { this._audioEnabled = false; }
+    try {
+      this._audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this._audioEnabled = true;
+      const sr = this._audioContext.sampleRate;
+      const buf = this._audioContext.createBuffer(1, Math.floor(sr * 0.5), sr);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      this._noiseBuf = buf;
+    } catch (e) { this._audioEnabled = false; }
   }
 
+  /** "Clack" de madera estilo sorteador real: golpe corto + textura de ruido. */
   _playTick() {
-    if (!this._audioEnabled || this._tickPlaying) return;
+    if (!this._audioEnabled || !this._noiseBuf || this._tickPlaying) return;
     this._tickPlaying = true;
-    const c = this._audioContext;
+    const c = this._audioContext, t = c.currentTime;
+
     const o = c.createOscillator(), g = c.createGain();
-    o.type = 'square';
-    o.frequency.value = 880;
-    g.gain.setValueAtTime(0.08, c.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.05);
+    o.type = 'triangle';
+    o.frequency.value = 1250 + Math.random() * 260;
+    g.gain.setValueAtTime(0.30, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
     o.connect(g); g.connect(c.destination);
-    o.start(); o.stop(c.currentTime + 0.06);
-    setTimeout(() => { this._tickPlaying = false; }, 65);
+    o.start(t); o.stop(t + 0.06);
+
+    const src = c.createBufferSource();
+    src.buffer = this._noiseBuf;
+    src.playbackRate.value = 1.6;
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 3100; bp.Q.value = 1.4;
+    const ng = c.createGain();
+    ng.gain.setValueAtTime(0.10, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    src.connect(bp); bp.connect(ng); ng.connect(c.destination);
+    src.start(t); src.stop(t + 0.04);
+
+    setTimeout(() => { this._tickPlaying = false; }, 45);
   }
 
-  /** Sonido continuo del giro con modulación LFO (vibrato). */
+  /** Sonido continuo del giro: aire de la rueda (ruido grave) + resonancia. */
   _setSpinSound(start) {
     if (!this._audioEnabled) return;
     if (start) {
       if (this._spinOsc) return;
       const c = this._audioContext;
-      this._spinOsc = c.createOscillator();
-      this._spinGain = c.createGain();
-      this._spinLfo = c.createOscillator();          // LFO = oscilador, no gain
-      this._lfoAmp = c.createGain();                 // profundidad de modulación en Hz
-      this._spinOsc.type = 'sine';
-      this._spinOsc.frequency.value = 390;
-      this._spinOsc.frequency.linearRampToValueAtTime(720, c.currentTime + 4);
-      this._spinLfo.type = 'sine';
-      this._spinLfo.frequency.value = 6;
-      this._lfoAmp.gain.value = 42;
-      this._spinLfo.connect(this._lfoAmp);
-      this._lfoAmp.connect(this._spinOsc.frequency);
-      this._spinOsc.connect(this._spinGain);
-      this._spinGain.gain.value = 0.22;
-      this._spinGain.connect(c.destination);
-      this._spinOsc.start();
-      this._spinLfo.start();
+
+      const src = c.createBufferSource();
+      src.buffer = this._noiseBuf; src.loop = true;
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 850; lp.Q.value = 0.7;
+      const sw = c.createGain(); sw.gain.value = 0.055;
+      src.connect(lp); lp.connect(sw); sw.connect(c.destination);
+      src.start();
+
+      const o = c.createOscillator(), og = c.createGain();
+      o.type = 'sine'; o.frequency.value = 74;
+      og.gain.value = 0.045;
+      o.connect(og); og.connect(c.destination); o.start();
+
+      this._airSource = src; this._airFilter = lp; this._airGain = sw;
+      this._spinOsc = o; this._spinGain = og;
     } else {
+      try { if (this._airSource) this._airSource.stop(); } catch (e) {}
       try { if (this._spinOsc) this._spinOsc.stop(); } catch (e) {}
-      try { if (this._spinLfo) this._spinLfo.stop(); } catch (e) {}
-      this._spinOsc = null;
-      this._spinGain = null;
-      this._spinLfo = null;
-      this._lfoAmp = null;
+      this._airSource = null; this._airFilter = null; this._airGain = null;
+      this._spinOsc = null; this._spinGain = null;
     }
   }
 
-  _stopAllSounds() {
-    this._setSpinSound(false);
-    this._tickPlaying = false;
-  }
+  _stopAllSounds() { this._setSpinSound(false); this._tickPlaying = false; }
 
+  /** Fanfarria breve y alegre para el ganador definitivo. */
   _playDing() {
     if (!this._audioEnabled) return;
     const c = this._audioContext;
@@ -124,19 +153,100 @@ class RuletaCanvas {
     });
   }
 
+  /** Blip amable al revelar el resultado de una demostración. */
+  _playBlip() {
+    if (!this._audioEnabled) return;
+    const c = this._audioContext;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine'; o.frequency.value = 740;
+    const t = c.currentTime;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    o.connect(g); g.connect(c.destination);
+    o.start(t); o.stop(t + 0.3);
+  }
+
+  // ======================== DIBUJO / LEGIBILIDAD =============================
+
   _radio() {
     const { canvas } = this;
     return Math.min(canvas.width, canvas.height) / 2 - 10;
   }
 
+  /** Caracteres que caben por línea dentro del sector, según radio y fuente. */
+  _charsPorLinea(radio, F) {
+    const n = Math.max(this.participantes.length, 1);
+    const angle = n === 1 ? Math.PI * 0.9 : (2 * Math.PI) / n;
+    const chord = 2 * 0.60 * radio * Math.sin(angle / 2);
+    return Math.max(1, Math.floor((chord * 0.92) / (0.60 * F)));
+  }
+
+  /** Fuente óptima para que el nombre más largo quepa sin desbordar. */
+  _calcularFuente(radio) {
+    const n = Math.max(this.participantes.length, 1);
+    const angle = n === 1 ? Math.PI * 0.9 : (2 * Math.PI) / n;
+    let F = 30;
+    for (let i = 0; i < 14; i++) {
+      const chord = 2 * 0.60 * radio * Math.sin(angle / 2);
+      const chars = Math.max(1, Math.floor((chord * 0.92) / (0.60 * F)));
+      const lines = Math.max(1, Math.ceil(this._maxNameLen / chars));
+      // Radial: etiqueta + líneas de nombre deben caber en la banda [0.50R, 0.95R]
+      const radialF = (0.45 * radio) / (0.6 + 1.12 * lines);
+      F = Math.min(F, radialF, 30);
+    }
+    return Math.max(7, Math.floor(F));
+  }
+
+  /**
+   * Diámetro recomendado (px) para que TODOS los nombres sean legibles:
+   * fuente >= 12px y máximo 3 líneas por nombre.
+   */
+  tamanoRecomendado() {
+    const n = Math.max(this.participantes.length, 1);
+    let R = Math.min(1600, Math.max(240, n * 4 + 300));
+    for (let i = 0; i < 70 && R < 1600; i++) {
+      const F = this._calcularFuente(R);
+      const chars = this._charsPorLinea(R, F);
+      const lines = this._wrappear(String(this._maxName || ''), chars).length;
+      if (F >= 12 && lines <= 3) break;
+      R += 25;
+    }
+    return Math.min(1600, Math.max(360, Math.round(R)));
+  }
+
+  _wrappear(texto, chars) {
+    const t = String(texto || '').trim() || '—';
+    const c = Math.max(1, chars | 0);
+    const palabras = t.split(/\s+/);
+    const lineas = [];
+    let cur = '';
+    for (const w of palabras) {
+      const candidato = cur ? cur + ' ' + w : w;
+      if (candidato.length <= c) { cur = candidato; }
+      else {
+        if (cur) lineas.push(cur);
+        cur = w.length > c ? w.slice(0, c) : w;
+      }
+    }
+    if (cur) lineas.push(cur);
+    return lineas.slice(0, 3);
+  }
+
+  _recortarLinea(linea, chars) {
+    const c = Math.max(1, chars | 0);
+    if (linea.length <= c) return linea;
+    return linea.slice(0, c - 1) + '…';
+  }
+
   _bake() {
-    const S = Math.min(this.canvas.width, this.canvas.height);
     const W = this.canvas.width, H = this.canvas.height;
     const cx = W / 2, cy = H / 2;
     const radio = this._radio();
     const n = Math.max(this.participantes.length, 1);
     const anguloSegmento = (2 * Math.PI) / n;
-    const sectorWidth = anguloSegmento * radio;
+    const F = this._calcularFuente(radio);
+    const chars = this._charsPorLinea(radio, F);
 
     const off = document.createElement('canvas');
     off.width = W;
@@ -163,35 +273,22 @@ class RuletaCanvas {
       o.rotate(inicio + anguloSegmento / 2);
 
       const label = '#' + (p.label != null ? p.label : p.numero);
-      const name = String(p.nombre || '');
+      const nombre = String(p.nombre || '—');
+      const lineas = this._wrappear(nombre, chars).map(l => this._recortarLinea(l, chars));
+      const maxLineasRadiales = Math.max(1, Math.floor((radio * 0.95 - radio * 0.50 - F * 0.6) / (F * 1.12)));
 
-      if (sectorWidth >= 70 && n <= 20) {
-        const fontSize = Math.min(16 + S / 40, Math.max(10, Math.floor(sectorWidth / 7)));
-        o.font = 'bold ' + fontSize + 'px Sora, sans-serif';
-        o.textAlign = 'center';
-        o.fillStyle = '#fff';
-        o.fillText(label, radio * 0.6, -fontSize * 0.3);
-        const maxNameChars = Math.max(4, Math.floor((sectorWidth - 10) / 6));
-        const nameSize = Math.min(11 + S / 40, Math.max(7, Math.floor(sectorWidth / 10)));
-        o.font = 'bold ' + nameSize + 'px Sora, sans-serif';
-        o.fillStyle = 'rgba(255,255,255,.85)';
-        o.fillText(name.slice(0, maxNameChars), radio * 0.6, fontSize * 0.6);
-      } else if (sectorWidth >= 28) {
-        const fontSize = Math.min(14 + S / 40, Math.max(9, Math.floor(sectorWidth / 5)));
-        o.font = 'bold ' + fontSize + 'px Sora, sans-serif';
-        o.textAlign = 'center';
-        o.fillStyle = '#fff';
-        o.fillText(label, radio * 0.65, fontSize * 0.35);
-      } else {
-        // Ranuras muy finas (muchos participantes): mini número si aún cabe
-        const miniSize = Math.floor(sectorWidth / 3);
-        if (miniSize >= 7) {
-          o.font = 'bold ' + Math.min(miniSize, 12) + 'px JetBrains Mono, monospace';
-          o.textAlign = 'center';
-          o.fillStyle = 'rgba(255,255,255,.9)';
-          o.fillText(label, radio * 0.7, miniSize * 0.35);
-        }
-      }
+      o.font = 'bold ' + F + 'px Sora, sans-serif';
+      o.textAlign = 'center';
+      o.textBaseline = 'middle';
+      o.fillStyle = esGanador ? '#fff' : 'rgba(255,255,255,.95)';
+
+      let x = radio * 0.50 + F * 0.6;
+      o.fillText(this._recortarLinea(label, Math.max(4, chars)), x, 0);
+      x += F * 1.12;
+      lineas.slice(0, maxLineasRadiales).forEach(ln => {
+        o.fillText(ln, x, 0);
+        x += F * 1.12;
+      });
 
       o.restore();
     });
@@ -249,13 +346,15 @@ class RuletaCanvas {
     }
   }
 
-  /** Redimensiona el canvas (misma instancia) y vuelve a pintar. */
+  /** Redimensiona el canvas (misma instancia) y re-pinta adaptado. */
   cambiarTamano(w, h) {
     this.canvas.width = w || this.canvas.width;
     this.canvas.height = h || this.canvas.height;
     this._bake();
     this.dibujar();
   }
+
+  // ============================= GRABACIÓN ==================================
 
   iniciarGrabacion() {
     if (!this.canvas.captureStream) return false;
@@ -284,10 +383,8 @@ class RuletaCanvas {
     });
   }
 
-  /**
-   * Gira una sola vez hasta el centro del sector `idxObjetivo`.
-   * @returns {Promise<void>}
-   */
+  // ============================= GIRO =======================================
+
   _girarUna(idxObjetivo, duracionMs) {
     return new Promise((resolve) => {
       if (this._raf) cancelAnimationFrame(this._raf);
@@ -299,19 +396,27 @@ class RuletaCanvas {
       const anguloInicial = this.anguloActual;
       const distancia = anguloFinal - (anguloInicial % (2 * Math.PI));
 
+      const idxSector = () => {
+        const a = ((this.anguloActual % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
+        return Math.floor(a / anguloSegmento);
+      };
+      let ultimoSector = idxSector();
+
       this._setSpinSound(true);
-      const tickInterval = setInterval(() => { if (this._audioEnabled && !this._tickPlaying) this._playTick(); }, 90);
       const inicio = performance.now();
 
       const paso = (ahora) => {
         const t = Math.min(1, (ahora - inicio) / duracionMs);
         const easeOut = 1 - Math.pow(1 - t, 5);
         this.anguloActual = anguloInicial + distancia * easeOut;
+
+        const s = idxSector();
+        if (s !== ultimoSector) { this._playTick(); ultimoSector = s; }
+
         this.dibujar();
         if (t < 1) { this._raf = requestAnimationFrame(paso); }
         else {
           this._raf = null;
-          clearInterval(tickInterval);
           this._setSpinSound(false);
           resolve();
         }
@@ -320,14 +425,15 @@ class RuletaCanvas {
     });
   }
 
-  _pausa(ms) {
-    return new Promise(r => setTimeout(r, ms));
-  }
+  _pausa(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   /**
-   * Realiza el sorteo visual. Si `vueltas > 1`, las primeras son
-   * demostraciones girando a números aleatorios (el sistema es 100% al azar),
-   * y la última es la definitiva que aterriza en el ganador real del backend.
+   * Sorteo visual completo.
+   * Si `vueltas > 1`, las primeras son DEMOSTRACIONES: giran a un número al
+   * azar, se REVELA al "ganador de ese momento" en pantalla con el mensaje
+   * "RULETA X DE N", y luego la última vuelta es "RULETA N DE N QUE DEFINE EL
+   * GANADOR" y aterriza en el ganador real decidido por el backend.
+   *
    * @param {number} numeroGanador - número ganador decidido por el backend
    * @param {Object} [opts] - { vueltas, duracionMs }
    * @returns {Promise<string>} URL del video de evidencia
@@ -343,35 +449,57 @@ class RuletaCanvas {
     this._winnerIdx = idxWinner;
     this._mostrarGanador = false;
     this._bake();
+    this.dibujar();
 
     this.iniciarGrabacion();
 
-    // Vueltas de demostración
+    // --------- Vueltas de demostración ---------
     for (let v = 1; v < vueltas; v++) {
-      // Número aleatorio distinto del ganador real
       let idxDemo = Math.floor(Math.random() * this.participantes.length);
       if (this.participantes.length > 1) while (idxDemo === idxWinner) idxDemo = Math.floor(Math.random() * this.participantes.length);
-      if (this.onEstado) this.onEstado(`🔎 Demostración ${v} de ${vueltas - 1} — girando...`);
+      const demo = this.participantes[idxDemo];
+
+      this._winnerIdx = idxDemo;
+      this._mostrarGanador = false;
+      this._bake();
+      this.dibujar();
+      if (this.onEstado) this.onEstado(`🎡 RULETA ${v} DE ${vueltas} — girando...`);
       await this._girarUna(idxDemo, duracionMs);
-      if (this.onEstado) this.onEstado(`✅ Demostración ${v} de ${vueltas - 1} completa — el sistema es 100% al azar.`);
-      await this._pausa(900);
+
+      await this._pausa(350);
+      this._winnerIdx = idxDemo;
+      this._mostrarGanador = true;
+      this._bake();
+      this.dibujar();
+      this._playBlip();
+      if (this.onEstado) this.onEstado(`🎲 RULETA ${v} DE ${vueltas} — ganó ${demo.nombre} (#${demo.label != null ? demo.label : demo.numero}). Es una demostración: el sistema es 100% al azar.`);
+      if (this.onMomento) this.onMomento(demo, v, vueltas, false);
+      await this._pausa(2600);
     }
 
-    // Vuelta definitiva
-    if (this.onEstado) this.onEstado(`${vueltas > 1 ? '🎯 ¡Vuelta definitiva! ' : ''}Revelando ganador...`);
+    // --------- Vuelta definitiva ---------
+    this._winnerIdx = idxWinner;
+    this._mostrarGanador = false;
+    this._bake();
+    this.dibujar();
+    if (this.onEstado) this.onEstado(`🏆 RULETA ${vueltas} DE ${vueltas} — QUE DEFINE EL GANADOR`);
     await this._girarUna(idxWinner, duracionMs);
 
-    await this._pausa(500);
+    await this._pausa(400);
+    this._winnerIdx = idxWinner;
     this._mostrarGanador = true;
     this._bake();
     this.dibujar();
 
+    const ganador = this.participantes[idxWinner];
     const videoUrl = await this.detenerGrabacion();
 
-    if (this.onEstado) this.onEstado('🏆 ¡Ganador revelado!');
+    if (this.onEstado) this.onEstado(`🏆 GANADOR: ${ganador.nombre} — número #${ganador.label != null ? ganador.label : ganador.numero}`);
+    if (this.onMomento) this.onMomento(ganador, vueltas, vueltas, true);
     if (this.onGanador) this.onGanador();
+    if (this.onEstado) this.onEstado('🏆 ¡Ganador revelado! 🎉');
 
-    setTimeout(() => this._showGanarModal(), 600);
+    setTimeout(() => this._showGanarModal(), 700);
     return videoUrl;
   }
 

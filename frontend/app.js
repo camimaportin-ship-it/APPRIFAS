@@ -3225,7 +3225,7 @@ async function renderSorteoTab(rifa, box) {
             </select>
           </div>
         </div>
-        <p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado. Las primeras vueltas son <strong>demostraciones</strong> (prueban que el sistema es 100% al azar); la <strong>última</strong> es la definitiva y elige al ganador. Se grabará un video de evidencia. 💻 Abre <strong>Pantalla completa</strong> durante el sorteo para ver los nombres sin importar cuántos participantes haya.</p>`;
+        <p class="text-sm text-ink-600">La ruleta girará solo entre los <strong>${pagados.length}</strong> participantes con pago confirmado, y <strong>todos los nombres se muestran en la ruleta</strong> (se ajusta sola al tamaño necesario para que nadie quede fuera). Las primeras vueltas son <strong>demostraciones</strong>: cada una revela a su "ganador del momento" con el mensaje <strong>RULETA X DE N</strong>, y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. Se graba video de evidencia. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>`;
     }
   };
   sel.addEventListener('change', renderConfig);
@@ -3279,11 +3279,18 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
         </div>`;
       const rueda = new RuletaCanvas(document.getElementById('canvas-ruleta'), pagados.map(p => ({ numero: p.numero, nombre: p.nombre, label: etiquetar(p.numero) })), {
         onEstado: (txt) => { const el = document.getElementById('ruleta-estado'); if (el) el.textContent = txt; },
+        onMomento: (p, idx, total, definitiva) => {
+          document.querySelectorAll('#area-sorteo .ruleta-demo').forEach(el => el.classList.remove('ruleta-demo'));
+          const li = document.querySelector(`#area-sorteo [data-numero="${etiquetar(p.numero)}"]`);
+          if (li) li.classList.add(definitiva ? 'ganador' : 'ruleta-demo');
+        },
         onGanador: () => {
           const fg = document.querySelector(`#area-sorteo [data-numero="${etiquetar(resultado.ganadores[0].numero)}"]`);
-          if (fg) fg.classList.add('ganador');
+          if (fg) { fg.classList.remove('ruleta-demo'); fg.classList.add('ganador'); }
         }
       });
+      const tamFinal = Math.max(tamano, Math.min(rueda.tamanoRecomendado(), Math.floor(window.innerWidth - 40)));
+      rueda.cambiarTamano(tamFinal, tamFinal);
       const resultado = await api('/rifas/' + rifa.id + '/sortear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
       // Pantalla completa: mueve el mismo canvas a un overlay para maximizarlo
@@ -3308,7 +3315,7 @@ async function ejecutarSorteo(rifa, pagados, modalidad) {
           contenedor.appendChild(canvas);
           canvas.style.maxWidth = '';
           canvas.style.height = '';
-          rueda.cambiarTamano(tamano, tamano);
+          rueda.cambiarTamano(tamFinal, tamFinal);
         });
         ov.appendChild(btnSalir);
         document.body.appendChild(ov);

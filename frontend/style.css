@@ -620,6 +620,9 @@ table.tbl tr:hover td{background:var(--gold-100);}
 .anim-lista-ol li span:last-child{flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .anim-lista-ol li.ganador{background:var(--gold-100); color:#946200; font-weight:700;}
 .anim-lista-ol li.ganador .mono{color:#946200;}
+.anim-lista-ol li.ruleta-demo{background:rgba(212,160,23,.12); color:#946200; outline:1px solid rgba(212,160,23,.45); animation:ruleta-demo-pulso 1.1s ease-in-out infinite;}
+.anim-lista-ol li.ruleta-demo .mono{color:#946200;}
+@keyframes ruleta-demo-pulso{0%,100%{box-shadow:0 0 0 0 rgba(212,160,23,.35);}50%{box-shadow:0 0 0 5px rgba(212,160,23,0);}}
 @media(max-width:600px){.anim-layout{flex-direction:column; align-items:center;} .anim-lista{flex:0 0 auto; max-height:none; width:100%;}}
 
 /* ---------- Toolbar de rifas (filtros + vista) ---------- */
