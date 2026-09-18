@@ -31,8 +31,9 @@ class RuletaCanvas {
   /**
    * @param {HTMLCanvasElement} canvas
    * @param {Array<{numero:number, nombre:string, label?:string}>} participantes - solo pagados
-   * @param {Object} [opts]
-   * @param {'auto'|'ruleta'|'tambor'} [opts.modo]
+* @param {Object} [opts]
+    * @param {'auto'|'ruleta'|'tambor'} [opts.modo]
+    * @param {string} [opts.titulo] - texto del núcleo central (nombre de la rifa)
    * @param {Function} [opts.onEstado] - callback(texto) para la UI de estado
    * @param {Function} [opts.onBanner] - callback(idx, participante) nombre en vivo bajo la aguja
    * @param {Function} [opts.onMomento] - callback(participante, idxVuelta, totalVueltas, esDefinitiva)
@@ -81,10 +82,10 @@ class RuletaCanvas {
 
     this._maxNameLen = Math.max(1, ...this.participantes.map(p => String(p.nombre || '').length), 1);
     this._maxName = this.participantes.reduce((a, p) => (String(p.nombre || '').length > String(a || '').length ? p.nombre : a), '');
-    this._maxTotalChars = Math.max(1, ...this.participantes.map(p => {
-      const lbl = '#' + (p.label != null ? p.label : p.numero);
-      return String(lbl).length + String(p.nombre || '—').length + 1;
-    }));
+    // Los rayos llevan SOLO el nombre (sin "#0001"): el número va en el banner lateral y la lista
+    this._maxTotalChars = Math.max(1, ...this.participantes.map(p => String(p.nombre || '—').length));
+    // Título del núcleo central (nombre de la rifa); ya NO se muestra el contador
+    this.titulo = String((this.opts && this.opts.titulo) || '🎡 SORTEO');
 
     this._dims();
     if (this.modo === 'tambor') {
@@ -302,22 +303,21 @@ class RuletaCanvas {
       o.lineWidth = 1;
       o.stroke();
 
-      // Nombre en RAYO RADIAL: letra por letra hacia afuera, letras SIEMPRE derechas
-      const label = '#' + (p.label != null ? p.label : p.numero);
-      const nombre = String(p.nombre || '—');
-      const texto = label + ' ' + nombre;
+      // Nombre en RAYO RADIAL: SOLO el nombre, letra por letra hacia afuera,
+      // letras SIEMPRE derechas y con contorno oscuro para máxima legibilidad
+      const texto = String(p.nombre || '—');
       o.font = 'bold ' + F + 'px Sora, sans-serif';
       o.textAlign = 'center';
       o.textBaseline = 'middle';
+      o.lineWidth = Math.max(2, Math.round(F * 0.18));
+      o.strokeStyle = 'rgba(11,18,41,.9)';
       for (let k = 0; k < texto.length; k++) {
         const r = rIn + k * F * 0.95 + F * 0.5;
         const x = Math.round(cx + Math.cos(mid) * r);
         const y = Math.round(cy + Math.sin(mid) * r);
         const ch = texto.charAt(k);
-        // Número en dorado, nombre en blanco (todo blanco para el ganador)
-        o.fillStyle = esGanador
-          ? '#fff'
-          : (k < label.length && ch !== ' ') ? '#E8B923' : 'rgba(255,255,255,.96)';
+        o.strokeText(ch, x, y);
+        o.fillStyle = esGanador ? '#fff' : 'rgba(255,255,255,.98)';
         o.fillText(ch, x, y);
       }
     });
@@ -489,25 +489,36 @@ class RuletaCanvas {
 
     ctx.save();
 
-    // Núcleo decorativo FIJO (no rota con la rueda): cantidad de participantes
+    // Núcleo decorativo FIJO (no rota con la rueda): nombre de la rifa
     const rIn = radio * 0.44;
+    const hubR = rIn - 6;
     ctx.beginPath();
-    ctx.arc(cx, cy, rIn - 6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, hubR, 0, Math.PI * 2);
     ctx.fillStyle = '#0B1229';
     ctx.fill();
     ctx.strokeStyle = 'rgba(212,160,23,.8)';
     ctx.lineWidth = 3;
     ctx.stroke();
-    const nHub = Math.max(this.participantes.length, 1);
-    const fHub = Math.max(20, Math.min(54, Math.round(radio / 26)));
-    ctx.fillStyle = '#E8B923';
-    ctx.font = 'bold ' + fHub + 'px JetBrains Mono, monospace';
+    // Título en hasta 3 líneas, sin mostrar el contador de participantes
+    const fHub = Math.max(16, Math.min(40, Math.round(radio / 34)));
+    const charsHub = Math.max(6, Math.floor((hubR * 1.5) / (fHub * 0.58)));
+    const palabras = this.titulo.split(/\s+/).filter(Boolean);
+    const lineas = [];
+    let cur = '';
+    for (const w of palabras) {
+      const cand = cur ? cur + ' ' + w : w;
+      if (cand.length <= charsHub) cur = cand;
+      else { if (cur) lineas.push(cur); cur = w.length > charsHub * 1.6 ? w.slice(0, charsHub) : w; }
+      if (lineas.length >= 3) break;
+    }
+    if (cur && lineas.length < 3) lineas.push(cur.length > charsHub ? cur.slice(0, charsHub - 1) + '…' : cur);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(nHub), cx, cy - Math.round(fHub * 0.55));
-    ctx.fillStyle = 'rgba(255,255,255,.85)';
-    ctx.font = 'bold ' + Math.max(12, Math.min(22, Math.round(fHub * 0.62))) + 'px Sora, sans-serif';
-    ctx.fillText('participantes', cx, cy + Math.round(fHub * 0.75));
+    ctx.font = 'bold ' + fHub + 'px Sora, sans-serif';
+    ctx.fillStyle = '#E8B923';
+    const paso = Math.round(fHub * 1.25);
+    const y0 = cy - Math.round((lineas.length - 1) * paso / 2);
+    lineas.slice(0, 3).forEach((ln, i) => ctx.fillText(ln, cx, y0 + i * paso));
     ctx.restore();
 
     if (this._mostrarGanador && this._winnerIdx >= 0) {

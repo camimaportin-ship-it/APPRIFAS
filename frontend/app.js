@@ -3301,7 +3301,7 @@ async function renderSorteoTab(rifa, box) {
             </select>
           </div>
         </div>
-        <p class="text-sm text-ink-600"><strong>Ruleta circular SIEMPRE</strong>: los nombres se escriben en <strong>rayos radiales</strong> (centro→borde, letras derechas), de modo que caben y son <strong>legibles con CUALQUIER cantidad de participantes</strong>: nunca se cortan ni se pisan (la rueda se agranda sola para mantener la letra). Además, el <strong>banner lateral</strong> muestra en vivo (a alta velocidad) el nombre que está bajo la aguja. Las vueltas previas son <strong>demostraciones</strong> (RULETA X DE N) y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
+        <p class="text-sm text-ink-600"><strong>Ruleta circular SIEMPRE</strong>: los <strong>nombres</strong> se escriben en <strong>rayos radiales</strong> (centro→borde, letras derechas con contorno), de modo que caben y son <strong>legibles con CUALQUIER cantidad de participantes</strong>: nunca se cortan ni se pisan (la rueda se agranda sola para mantener la letra). Los <strong>números</strong> de boleta aparecen en el <strong>banner lateral</strong>, que muestra en vivo (a alta velocidad) el nombre y número que está bajo la aguja. Las vueltas previas son <strong>demostraciones</strong> (RULETA X DE N) y la última dice <strong>RULETA N DE N — QUE DEFINE EL GANADOR</strong>. El video de evidencia se graba en <strong>alta calidad (60 fps con sonido)</strong>. 💻 Usa <strong>Pantalla completa</strong> para verlo aún más grande.</p>
         <label class="check-row mt-2"><input type="checkbox" id="ruleta-manual" checked> <span>⏸️ <strong>Pausar entre giros:</strong> yo elijo el momento del siguiente giro para dar pausa y explicar cada resultado</span></label>
         <label class="check-row"><input type="checkbox" id="ruleta-tambor"> <span>🛢️ <strong>Usar tambor gigante (opcional):</strong> solo si prefieres el formato vertical de filas gigantes en lugar de la ruleta circular</span></label>`;
     }
@@ -3367,6 +3367,7 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
       const elBannerName = document.getElementById('ruleta-banner-name');
       const rueda = new RuletaCanvas(document.getElementById('canvas-ruleta'), pagados.map(p => ({ numero: p.numero, nombre: p.nombre, label: etiquetar(p.numero) })), {
         modo: (document.getElementById('ruleta-tambor') || {}).checked ? 'tambor' : 'ruleta',
+        titulo: rifa.nombre || '🎡 SORTEO',
         onEstado: (txt) => { const el = document.getElementById('ruleta-estado'); if (el) el.textContent = txt; },
         onBanner: (idx, p) => {
           if (elBannerNum) elBannerNum.textContent = '#' + (p && (p.label != null ? p.label : p.numero));
@@ -3659,7 +3660,7 @@ function probarRuleta() {
         </div>
       </div>
     </div>`;
-  const rueda = new RuletaCanvas(document.getElementById('canvas-prueba-ruleta'), participantes);
+  const rueda = new RuletaCanvas(document.getElementById('canvas-prueba-ruleta'), participantes, { titulo: '🎡 PRUEBA' });
   rueda.girarHasta(participantes[ganadorIdx].numero, dur).then(() => {
     const fila = document.querySelector(`#area-prueba [data-numero="${participantes[ganadorIdx].numero}"]`);
     if (fila) fila.classList.add('ganador');
@@ -3775,7 +3776,7 @@ async function renderPruebaRifa(container, rifaId) {
             </div>
           </div>
         </div>`;
-      const rueda = new RuletaCanvas(document.getElementById('canvas-preview-ruleta'), participantes);
+      const rueda = new RuletaCanvas(document.getElementById('canvas-preview-ruleta'), participantes, { titulo: rifa.nombre || '🎡 VISTA PREVIA' });
       const recPrev = rueda.tamanoRecomendado();
       rueda.cambiarTamano(Math.max(360, Math.min(recPrev.w, Math.floor(window.innerWidth - 60))), Math.max(360, Math.min(recPrev.h, Math.floor(window.innerWidth - 60))));
       rueda.girarHasta(participantes[ganadorIdx].numero, 4500).then(() => {
