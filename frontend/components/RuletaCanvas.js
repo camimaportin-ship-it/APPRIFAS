@@ -5,13 +5,15 @@
  * lo determina el backend (server.js) con la "semilla aleatoria" guardada en la
  * tabla `ganadores`. Esta vista es la capa VISUAL que aterriza en ese ganador.
  *
- * FORMATO HÍBRIDO AUTOMÁTICO:
- *  - `ruleta` (circular clásica): cuando hay pocos participantes (n <= 18),
- *    los nombres caben legibles dentro de cada sector.
- *  - `tambor` / gigantón: cuando hay muchos participantes, en lugar de un pastel
- *    con sectores diminutos se dibuja un TAMBOR VERTICAL donde CADA participante
- *    es una fila GIGANTE (número + nombre) que gira detrás de una flecha. Con
- *    esto TODOS los nombres quedan legibles sin importar la cantidad.
+ * FORMATO: RULETA CIRCULAR SIEMPRE.
+ *  - Los nombres se escriben en "RAYOS RADIALES" (en dirección del centro al
+ *    borde, letra por letra y con las letras SIEMPRE derechas). Así caben con
+ *    CUALQUIER cantidad de participantes: el único límite es el ancho de una
+ *    letra por sector, por lo que los nombres NUNCA se cortan ni se pisan.
+ *    La fuente crece/shrink en función de la cantidad (física de un disco) y el
+ *    canvas se agranda automáticamente para mantener letra legible.
+ *  - El TAMBOR vertical (gigantón, con filas GIGANTES de número + nombre) queda
+ *    como MODO OPCIONAL activable por el organizador, no automático.
  *
  * Además, en ambos formatos hay un BANNER gigante (callback onBanner) que muestra
  * en vivo, a alta velocidad, el NOMBRE del participante que está bajo la aguja.
@@ -58,10 +60,10 @@ class RuletaCanvas {
     this._raf = null;
     this._lastBannerIdx = -1;
 
-    // Umbrales del formato híbrido
+    // Umbrales del formato híbrido (tambor SOLO opcional, nunca automático)
     this.UMBRAL_TAMBOR = 18;
-    const modoPc = this.opts.modo || 'auto';
-    this.modo = modoPc === 'auto' ? (this.participantes.length > this.UMBRAL_TAMBOR ? 'tambor' : 'ruleta') : modoPc;
+    const modoPc = this.opts.modo || 'ruleta';
+    this.modo = modoPc === 'tambor' ? 'tambor' : 'ruleta';
 
     // Audio: contexto + buffer de ruido blanco enrutado a un MASTER grabable.
     this._audioContext = null;
@@ -79,6 +81,10 @@ class RuletaCanvas {
 
     this._maxNameLen = Math.max(1, ...this.participantes.map(p => String(p.nombre || '').length), 1);
     this._maxName = this.participantes.reduce((a, p) => (String(p.nombre || '').length > String(a || '').length ? p.nombre : a), '');
+    this._maxTotalChars = Math.max(1, ...this.participantes.map(p => {
+      const lbl = '#' + (p.label != null ? p.label : p.numero);
+      return String(lbl).length + String(p.nombre || '—').length + 1;
+    }));
 
     this._dims();
     if (this.modo === 'tambor') {
@@ -236,63 +242,24 @@ class RuletaCanvas {
   }
 
   _tamanoCircular() {
+    // Tamaño W=H para que los rayos radiales queden legibles con CUALQUIER
+    // cantidad y con nombres largos: el radio crece con n Y con el nombre más
+    // largo (la fuente base queda ~14px+ incluso con 150+).
     const n = Math.max(this.participantes.length, 1);
-    let R = Math.min(1600, Math.max(240, n * 4 + 300));
-    for (let i = 0; i < 70 && R < 1600; i++) {
-      const F = this._calcularFuente(R);
-      const chars = this._charsPorLinea(R, F);
-      const lines = this._wrappear(String(this._maxName || ''), chars).length;
-      if (F >= 13 && lines <= 3) break;
-      R += 25;
-    }
-    return Math.min(1600, Math.max(360, Math.round(R)));
+    const R = Math.max(4.5 * n, 50 * this._maxTotalChars) * 1.05;
+    return Math.min(1650, Math.max(360, Math.round(R * 2 + 4)));
   }
 
-  // ====================== RULETA CIRCULAR (pocos) ===========================
+  // ==================== RULETA CIRCULAR (siempre) ===========================
 
-  _charsPorLinea(radio, F) {
+  /** Fuente para los rayos radiales: limitada por el arco (ancho de 1 letra por sector). */
+  _fuenteRayos(radio) {
     const n = Math.max(this.participantes.length, 1);
-    const angle = n === 1 ? Math.PI * 0.9 : (2 * Math.PI) / n;
-    const chord = 2 * 0.60 * radio * Math.sin(angle / 2);
-    return Math.max(1, Math.floor((chord * 0.92) / (0.60 * F)));
-  }
-
-  _calcularFuente(radio) {
-    const n = Math.max(this.participantes.length, 1);
-    const angle = n === 1 ? Math.PI * 0.9 : (2 * Math.PI) / n;
-    let F = 30;
-    for (let i = 0; i < 14; i++) {
-      const chord = 2 * 0.60 * radio * Math.sin(angle / 2);
-      const chars = Math.max(1, Math.floor((chord * 0.92) / (0.60 * F)));
-      const lines = Math.max(1, Math.ceil(this._maxNameLen / chars));
-      const radialF = (0.45 * radio) / (0.6 + 1.12 * lines);
-      F = Math.min(F, radialF, 30);
-    }
-    return Math.max(7, Math.floor(F));
-  }
-
-  _wrappear(texto, chars) {
-    const t = String(texto || '').trim() || '—';
-    const c = Math.max(1, chars | 0);
-    const palabras = t.split(/\s+/);
-    const lineas = [];
-    let cur = '';
-    for (const w of palabras) {
-      const candidato = cur ? cur + ' ' + w : w;
-      if (candidato.length <= c) { cur = candidato; }
-      else {
-        if (cur) lineas.push(cur);
-        cur = w.length > c ? w.slice(0, c) : w;
-      }
-    }
-    if (cur) lineas.push(cur);
-    return lineas.slice(0, 3);
-  }
-
-  _recortarLinea(linea, chars) {
-    const c = Math.max(1, chars | 0);
-    if (linea.length <= c) return linea;
-    return linea.slice(0, c - 1) + '…';
+    const rIn = radio * 0.44;
+    const arco = rIn * ((2 * Math.PI) / n);
+    const Ftan = Math.floor((arco * 0.90) / 0.80);          // ancho tangencial de 1 letra
+    const Frad = Math.floor(((radio * 0.96) - rIn) / (this._maxTotalChars * 0.95)); // largo radial
+    return Math.max(7, Math.min(46, Ftan, Frad));
   }
 
   _bake() {
@@ -302,56 +269,62 @@ class RuletaCanvas {
     const radio = this._radio();
     const n = Math.max(this.participantes.length, 1);
     const anguloSegmento = (2 * Math.PI) / n;
-    const F = this._calcularFuente(radio);
-    const chars = this._charsPorLinea(radio, F);
+    const F = this._fuenteRayos(radio);
+    const rIn = radio * 0.44;
 
     const off = document.createElement('canvas');
     off.width = W;
     off.height = H;
     const o = off.getContext('2d');
-    o.translate(cx, cy);
 
     this.participantes.forEach((p, i) => {
       const inicio = i * anguloSegmento;
       const fin = inicio + anguloSegmento;
       const esGanador = this._mostrarGanador && i === this._winnerIdx;
 
+      // Sector (cuña) alternando colores
       o.beginPath();
-      o.moveTo(0, 0);
-      o.arc(0, 0, radio, inicio, fin);
+      o.moveTo(cx, cy);
+      o.arc(cx, cy, radio, inicio, fin);
       o.closePath();
       o.fillStyle = esGanador ? '#9A6B00' : this.colores[i % this.colores.length];
       o.fill();
-      o.strokeStyle = '#F5F6F9';
+      o.strokeStyle = esGanador ? '#E8B923' : '#F5F6F9';
       o.lineWidth = esGanador ? 5 : 2;
       o.stroke();
 
-      o.save();
-      o.rotate(inicio + anguloSegmento / 2);
+      // Raya separadora desde el borde interior hasta el aro
+      const mid = inicio + anguloSegmento / 2;
+      o.beginPath();
+      o.moveTo(cx + Math.cos(inicio) * rIn, cy + Math.sin(inicio) * rIn);
+      o.lineTo(cx + Math.cos(inicio) * (radio - 3), cy + Math.sin(inicio) * (radio - 3));
+      o.strokeStyle = 'rgba(245,246,249,.45)';
+      o.lineWidth = 1;
+      o.stroke();
 
+      // Nombre en RAYO RADIAL: letra por letra hacia afuera, letras SIEMPRE derechas
       const label = '#' + (p.label != null ? p.label : p.numero);
       const nombre = String(p.nombre || '—');
-      const lineas = this._wrappear(nombre, chars).map(l => this._recortarLinea(l, chars));
-      const maxLineasRadiales = Math.max(1, Math.floor((radio * 0.95 - radio * 0.50 - F * 0.6) / (F * 1.12)));
-
+      const texto = label + ' ' + nombre;
       o.font = 'bold ' + F + 'px Sora, sans-serif';
       o.textAlign = 'center';
       o.textBaseline = 'middle';
-      o.fillStyle = esGanador ? '#fff' : 'rgba(255,255,255,.95)';
-
-      let x = radio * 0.50 + F * 0.6;
-      o.fillText(this._recortarLinea(label, Math.max(4, chars)), x, 0);
-      x += F * 1.12;
-      lineas.slice(0, maxLineasRadiales).forEach(ln => {
-        o.fillText(ln, x, 0);
-        x += F * 1.12;
-      });
-
-      o.restore();
+      for (let k = 0; k < texto.length; k++) {
+        const r = rIn + k * F * 0.95 + F * 0.5;
+        const x = Math.round(cx + Math.cos(mid) * r);
+        const y = Math.round(cy + Math.sin(mid) * r);
+        const ch = texto.charAt(k);
+        // Número en dorado, nombre en blanco (todo blanco para el ganador)
+        o.fillStyle = esGanador
+          ? '#fff'
+          : (k < label.length && ch !== ' ') ? '#E8B923' : 'rgba(255,255,255,.96)';
+        o.fillText(ch, x, y);
+      }
     });
 
+    // Aro dorado exterior
     o.beginPath();
-    o.arc(0, 0, radio, 0, Math.PI * 2);
+    o.arc(cx, cy, radio - 2, 0, Math.PI * 2);
     o.strokeStyle = 'rgba(212,160,23,.55)';
     o.lineWidth = 4;
     o.stroke();
@@ -369,9 +342,11 @@ class RuletaCanvas {
   }
 
   _bannerIdxRuleta() {
+    // Sector que está bajo la aguja (parte superior, ángulo -PI/2 de pantalla)
     const n = Math.max(this.participantes.length, 1);
-    const a = ((this.anguloActual % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
-    return Math.floor(a / ((2 * Math.PI) / n)) % n;
+    const a = (-Math.PI / 2 - this.anguloActual) % (2 * Math.PI);
+    const norm = ((a % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
+    return Math.floor(norm / ((2 * Math.PI) / n)) % n;
   }
 
   _bannerIdx() {
@@ -512,14 +487,28 @@ class RuletaCanvas {
     ctx.fillStyle = '#D4A017';
     ctx.fill();
 
+    ctx.save();
+
+    // Núcleo decorativo FIJO (no rota con la rueda): cantidad de participantes
+    const rIn = radio * 0.44;
     ctx.beginPath();
-    ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+    ctx.arc(cx, cy, rIn - 6, 0, Math.PI * 2);
     ctx.fillStyle = '#0B1229';
     ctx.fill();
-    ctx.fillStyle = '#D4A017';
-    ctx.font = 'bold 12px Sora, sans-serif';
+    ctx.strokeStyle = 'rgba(212,160,23,.8)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    const nHub = Math.max(this.participantes.length, 1);
+    const fHub = Math.max(20, Math.min(54, Math.round(radio / 26)));
+    ctx.fillStyle = '#E8B923';
+    ctx.font = 'bold ' + fHub + 'px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('GIRA', cx, cy + 4);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(nHub), cx, cy - Math.round(fHub * 0.55));
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.font = 'bold ' + Math.max(12, Math.min(22, Math.round(fHub * 0.62))) + 'px Sora, sans-serif';
+    ctx.fillText('participantes', cx, cy + Math.round(fHub * 0.75));
+    ctx.restore();
 
     if (this._mostrarGanador && this._winnerIdx >= 0) {
       const p = this.participantes[this._winnerIdx];
