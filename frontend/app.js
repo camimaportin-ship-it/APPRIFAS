@@ -944,7 +944,9 @@ function renderFormularioRifa(rifa) {
         ? `Múltiples oportunidades usa siempre los números del <strong>00 al 99</strong>: cada boleta compra <strong>${(Number(v.n_oportunidades) || 4)} números</strong> y hay un máximo de <strong>${100 / (Number(v.n_oportunidades) || 4)} boletas</strong> (sin repetir).`
         : v.modalidad_boleta === 'CHANCE_CON_SIMBOLO'
           ? 'El chance usa siempre los números del <strong>00 al 99</strong>. Cada símbolo multiplica la cantidad de boletas disponibles.'
-          : 'El rango de números no se puede editar una vez creada la rifa.'}
+          : v.modalidad_boleta === 'BOLETAS_NORMAL'
+            ? 'El <strong>rango de números define el máximo de boletas</strong> (0-99 = 100 boletas, 0-999 = 1.000, 0-9999 = 10.000). Con <strong>"Cantidad ilimitada"</strong> la capacidad son las boletas del rango. Si una rifa ya creada quedó corta, <strong>edítala y sube "Rango hasta"</strong>: se agregan más boletas automáticamente y no se tocan las vendidas. <span id="hint-rango-ilimitada" style="color:var(--gold-600);"></span>'
+            : 'El rango de números se puede ampliar en cualquier momento editando la rifa (nunca por debajo de lo vendido).'}
     </p>
 
     <div class="field">
@@ -1182,6 +1184,18 @@ function bindFormularioRifa(rifa) {
     inputCantidad.disabled = on;
     if (on) inputCantidad.value = '0';
     else if (!Number(inputCantidad.value)) inputCantidad.value = '100';
+
+    // Con "ilimitada", el límite REAL es el rango de números: si sigue en el
+    // rango por defecto (0-99 = 100 boletas), ampliarlo para poder vender más.
+    const rangoMin = form.querySelector('input[name=rango_min]');
+    const rangoMax = form.querySelector('input[name=rango_max]');
+    const esNormal = form.querySelector('#modalidad-boleta').value === 'BOLETAS_NORMAL';
+    if (on && esNormal && rangoMin && rangoMax && Number(rangoMax.value || 99) <= 99) {
+      rangoMin.value = 0;
+      rangoMax.value = 9999;
+      const h = document.getElementById('hint-rango-ilimitada');
+      if (h) h.textContent = 'Autocompletado el rango a 0-9999 (= hasta 10.000 boletas). Puedes bajarlo si quieres menos boletas.';
+    }
   };
   if (selTipo) {
     aplicarHora();
@@ -2289,62 +2303,106 @@ function modalRegistroIndividual(rifaId, preseleccion) {
 
   let numerosDisponibles = [];
   let gruposDisponibles = [];
+  const selGrilla = new Set(aElegir === 1 && preseleccion && preseleccion.numero !== undefined ? [Number(preseleccion.numero)] : []);
+  let paginaGrilla = 0;
+  const PAGE_GR = 500;
   const sel = document.getElementById('sel-modo-asignacion');
   const grillaBox = document.getElementById('grilla-numeros');
+
+  const pintarGrilla = () => {
+    const celdas = document.getElementById('grilla-celdas');
+    if (esCuatro) { celdas.innerHTML = pintarGrupos(); return; }
+    if (numerosDisponibles.length === 0) { celdas.innerHTML = '<p class="text-sm text-ink-600">No hay números disponibles</p>'; return; }
+    const totalP = Math.max(1, Math.ceil(numerosDisponibles.length / PAGE_GR));
+    paginaGrilla = Math.max(0, Math.min(paginaGrilla, totalP - 1));
+    const ini = paginaGrilla * PAGE_GR;
+    const slice = numerosDisponibles.slice(ini, ini + PAGE_GR);
+    const nav = totalP > 1
+      ? `<div style="display:flex; gap:6px; align-items:center; justify-content:space-between; margin:8px 0 4px; flex-wrap:wrap;">
+          <span class="text-sm text-ink-600">Boletas ${ini + 1}-${Math.min(ini + PAGE_GR, numerosDisponibles.length)} de ${numerosDisponibles.length}</span>
+          <span style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-ghost btn-sm" ${paginaGrilla === 0 ? 'disabled' : ''} onclick="seleccionarNumPage(${paginaGrilla - 1})">‹ Anterior</button>
+            <button type="button" class="btn btn-ghost btn-sm" ${paginaGrilla >= totalP - 1 ? 'disabled' : ''} onclick="seleccionarNumPage(${paginaGrilla + 1})">Siguiente ›</button>
+          </span>
+        </div>`
+      : '';
+    celdas.innerHTML = nav + `
+      ${aElegir === 1
+        ? `<div style="display:flex; gap:6px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+            <input class="input" id="saltar-numero" type="number" min="${numerosDisponibles[0].numero}" max="${numerosDisponibles[numerosDisponibles.length - 1].numero}" placeholder="Ir al número exacto..." style="max-width:180px; font-size:13px;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="saltarNumero()">Ir</button>
+            <span class="text-sm text-ink-600">${selGrilla.size}/${aElegir} seleccionadas</span>
+          </div>` : ''}
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      ${slice.map(n => {
+        const vendido = n.estado !== 'libre';
+        const selNum = selGrilla.has(Number(n.numero));
+        return `<button type="button" class="grilla-celda ${vendido ? 'vendida' : 'libre'} ${selNum ? 'seleccionada' : ''}" data-numero="${n.numero}" ${vendido ? 'disabled' : ''}>${String(n.numero).padStart(2, '0')}</button>`;
+      }).join('')}
+    </div>`;
+    celdas.querySelectorAll('.grilla-celda.libre').forEach(celda => {
+      celda.addEventListener('click', () => {
+        const num = Number(celda.dataset.numero);
+        if (selGrilla.has(num)) selGrilla.delete(num);
+        else if (selGrilla.size < aElegir) selGrilla.add(num);
+        pintarGrilla();
+      });
+    });
+    const cont = document.getElementById('contador-seleccion');
+    if (cont) cont.textContent = selGrilla.size + '/' + aElegir;
+  };
+
+  const pintarGrupos = () => {
+    return gruposDisponibles.map((g, i) => {
+      const vendido = g.estado !== 'libre';
+      return `<button type="button" class="grupo-celda ${vendido ? 'vendida' : 'libre'}" data-grupo="${i}" ${vendido ? 'disabled' : ''}>
+        <span class="grupo-nums">${g.numeros.map(n => `<span class="grupo-num">${n}</span>`).join('')}</span>
+        <span class="grupo-estado">${vendido ? '🔴 vendido' : '🟢 disponible'}</span>
+      </button>`;
+    }).join('');
+  };
+
+  window.seleccionarNumPage = (p) => { paginaGrilla = p; pintarGrilla(); };
+  window.saltarNumero = () => {
+    const input = document.getElementById('saltar-numero');
+    const n = Number(input && input.value);
+    if (!Number.isInteger(n)) return;
+    const idx = numerosDisponibles.findIndex(x => Number(x.numero) === n && x.estado === 'libre');
+    if (idx < 0) { toast('Ese número no está disponible', 'error'); return; }
+    paginaGrilla = Math.floor(idx / PAGE_GR);
+    selGrilla.clear(); selGrilla.add(n);
+    pintarGrilla();
+  };
 
   const renderGrilla = async () => {
     const data = await api('/rifas/' + rifaId + '/available-numbers');
     numerosDisponibles = data.numeros;
     gruposDisponibles = data.grupos || [];
-    const celdas = document.getElementById('grilla-celdas');
-
+    pintarGrilla();
     if (esCuatro) {
-      // Grilla de grupos de 4 oportunidades
-      celdas.innerHTML = gruposDisponibles.map((g, i) => {
-        const vendido = g.estado !== 'libre';
-        return `<button type="button" class="grupo-celda ${vendido ? 'vendida' : 'libre'}" data-grupo="${i}" ${vendido ? 'disabled' : ''}>
-          <span class="grupo-nums">${g.numeros.map(n => `<span class="grupo-num">${n}</span>`).join('')}</span>
-          <span class="grupo-estado">${vendido ? '🔴 vendido' : '🟢 disponible'}</span>
-        </button>`;
-      }).join('');
-      celdas.querySelectorAll('.grupo-celda.libre').forEach(celda => {
-        celda.addEventListener('click', () => {
-          const ya = celda.classList.contains('seleccionada');
-          celdas.querySelectorAll('.grupo-celda').forEach(c => c.classList.remove('seleccionada'));
-          if (!ya) celda.classList.add('seleccionada');
-          const cont = document.getElementById('contador-seleccion');
-          if (cont) cont.textContent = celdas.querySelectorAll('.grupo-celda.seleccionada').length + '/1';
-        });
+      celdasGrillaGrupos();
+    }
+  };
+
+  const celdasGrillaGrupos = () => {
+    const celdas = document.getElementById('grilla-celdas');
+    celdas.querySelectorAll('.grupo-celda.libre').forEach(celda => {
+      celda.addEventListener('click', () => {
+        const ya = celda.classList.contains('seleccionada');
+        celdas.querySelectorAll('.grupo-celda').forEach(c => c.classList.remove('seleccionada'));
+        if (!ya) celda.classList.add('seleccionada');
+        const cont = document.getElementById('contador-seleccion');
+        if (cont) cont.textContent = celdas.querySelectorAll('.grupo-celda.seleccionada').length + '/1';
       });
-      // Preselección por número (click en casilla del mapa) o por grupo
-      if (preseleccion) {
-        const target = preseleccion.numeros
-          ? gruposDisponibles.findIndex(g => g.numeros.map(Number).join(',') === preseleccion.numeros.map(Number).join(','))
-          : gruposDisponibles.findIndex(g => g.numeros.map(Number).includes(Number(preseleccion.numero)));
-        if (target >= 0) {
-          const celda = celdas.querySelector(`.grupo-celda[data-grupo="${target}"]`);
-          if (celda) { celda.classList.remove('libre', 'vendida'); celda.classList.add('seleccionada'); }
-        }
-      }
-    } else {
-      // Grilla de números individuales
-      celdas.innerHTML = numerosDisponibles.map(n => {
-        const vendido = n.estado !== 'libre';
-        return `<button type="button" class="grilla-celda ${vendido ? 'vendida' : 'libre'}" data-numero="${n.numero}" data-estado="${n.estado}" ${vendido ? 'disabled' : ''}>${String(n.numero).padStart(2, '0')}</button>`;
-      }).join('');
-      celdas.querySelectorAll('.grilla-celda.libre').forEach(celda => {
-        celda.addEventListener('click', () => {
-          const ya = celda.classList.contains('seleccionada');
-          const elegidas = celdas.querySelectorAll('.grilla-celda.seleccionada').length;
-          if (ya) celda.classList.remove('seleccionada');
-          else if (elegidas < aElegir) celda.classList.add('seleccionada');
-          const cont = document.getElementById('contador-seleccion');
-          if (cont) cont.textContent = celdas.querySelectorAll('.grilla-celda.seleccionada').length + '/' + aElegir;
-        });
-      });
-      if (preseleccion && preseleccion.numero !== undefined) {
-        const celda = celdas.querySelector(`.grilla-celda[data-numero="${preseleccion.numero}"]`);
-        if (celda) celda.classList.add('seleccionada');
+    });
+    // Preselección por número (click en casilla del mapa) o por grupo
+    if (preseleccion) {
+      const target = preseleccion.numeros
+        ? gruposDisponibles.findIndex(g => g.numeros.map(Number).join(',') === preseleccion.numeros.map(Number).join(','))
+        : gruposDisponibles.findIndex(g => g.numeros.map(Number).includes(Number(preseleccion.numero)));
+      if (target >= 0) {
+        const celda = celdas.querySelector(`.grupo-celda[data-grupo="${target}"]`);
+        if (celda) { celda.classList.remove('libre', 'vendida'); celda.classList.add('seleccionada'); }
       }
     }
   };
@@ -2370,7 +2428,7 @@ function modalRegistroIndividual(rifaId, preseleccion) {
         delete fd.numeros;
         delete fd.numero;
       } else {
-        const elegidas = [...document.querySelectorAll('.grilla-celda.seleccionada')].map(c => Number(c.dataset.numero));
+        const elegidas = [...selGrilla].map(Number).sort((a, b) => a - b);
         if (elegidas.length !== aElegir) {
           toast(`Selecciona exactamente ${aElegir} casilla(s) en la tabla (llevas ${elegidas.length})`, 'error');
           return;
@@ -2665,14 +2723,32 @@ function _selEstadoPagoCambio(valor) {
 
 function _renderNumerosSeleccion(libres, seleccionados, s) {
   if (libres.length === 0) return '<p class="text-sm text-ink-600">No hay números disponibles</p>';
-  return `<div style="display:flex; flex-wrap:wrap; gap:6px;">
-    ${libres.map(n => {
-      const sel = seleccionados.includes(n.numero);
-      return `<button type="button" onclick="_toggleNumSeleccion(${n.numero})"
-        style="width:44px; height:36px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'};">
-        ${fmtNum(s.rifa, n.numero)}
-      </button>`;
-    }).join('')}
+  // Paginación: evita explotar el DOM con rangos grandes (ej. ilimitada 0-9999)
+  const PAGE = 500;
+  const totalP = Math.max(1, Math.ceil(libres.length / PAGE));
+  s.page = Math.max(0, Math.min(s.page || 0, totalP - 1));
+  const ini = s.page * PAGE;
+  const slice = libres.slice(ini, ini + PAGE);
+  const nav = totalP > 1
+    ? `<div style="display:flex; gap:6px; align-items:center; justify-content:space-between; margin:8px 0 2px; flex-wrap:wrap;">
+        <span style="font-size:12px; color:#8B94B3;">Mostrando ${ini + 1}-${Math.min(ini + PAGE, libres.length)} de ${libres.length}</span>
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-ghost btn-sm" ${s.page === 0 ? 'disabled' : ''} onclick="state._seleccionNumeros.page=${s.page - 1}; _renderModalSeleccion()">‹ Anterior</button>
+          <button type="button" class="btn btn-ghost btn-sm" ${s.page >= totalP - 1 ? 'disabled' : ''} onclick="state._seleccionNumeros.page=${s.page + 1}; _renderModalSeleccion()">Siguiente ›</button>
+        </span>
+      </div>`
+    : '';
+  return `<div>
+    ${nav}
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      ${slice.map(n => {
+        const sel = seleccionados.includes(n.numero);
+        return `<button type="button" onclick="_toggleNumSeleccion(${n.numero})"
+          style="width:44px; height:36px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:2px solid ${sel ? '#D4A017' : 'rgba(255,255,255,0.15)'}; background:${sel ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.05)'}; color:${sel ? '#F2C14E' : '#fff'};">
+          ${fmtNum(s.rifa, n.numero)}
+        </button>`;
+      }).join('')}
+    </div>
   </div>`;
 }
 
@@ -3307,10 +3383,18 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
         }
       });
       const rec = rueda.tamanoRecomendado();
-      const dispW = Math.max(320, Math.min(rec.w, Math.floor(window.innerWidth - 40)));
-      const dispH = Math.max(240, Math.round(rec.h * (dispW / rec.w)));
-      rueda.cambiarTamano(dispW, dispH);
-      const tamRec = { w: dispW, h: dispH, asp: dispH / dispW };
+      const tamRec = { w: rec.w, h: rec.h, asp: rec.h / rec.w };
+      // Ajusta la ruleta para que quepa COMPLETA (ancho Y alto) sin recortarse
+      const fitEn = (wMax, hMax, min) => {
+        const asp = tamRec.asp;
+        let w, h;
+        if (asp >= 1) { h = Math.min(hMax, wMax * asp); w = h / asp; }
+        else { w = Math.min(wMax, hMax / asp); h = w * asp; }
+        const m = min || 260;
+        return { w: Math.max(m, Math.floor(w)), h: Math.max(m, Math.floor(h)) };
+      };
+      const disp = fitEn(Math.floor(window.innerWidth - 56), Math.floor(window.innerHeight - 250), 260);
+      rueda.cambiarTamano(disp.w, disp.h);
       const resultado = await api('/rifas/' + rifa.id + '/sortear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const manualChk = document.getElementById('ruleta-manual');
       const manual = !manualChk || manualChk.checked;
@@ -3337,15 +3421,13 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
         const banner = document.getElementById('ruleta-banner');
         const contBanner = banner ? banner.parentNode : null;
         const ov = document.createElement('div');
-        ov.style.cssText = 'position:fixed;inset:0;background:#0B1229;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2400;padding:14px;';
+        ov.style.cssText = 'position:fixed;inset:0;background:#0B1229;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2400;padding:14px;overflow:auto;';
         ov.innerHTML = `<p style="color:#E8B923;font-weight:700;margin:0 0 8px;text-align:center;">🎡 Sorteo en pantalla completa</p>`;
         const span = document.createElement('span');
         span.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;';
         ov.appendChild(span);
         if (banner) span.appendChild(banner);
         span.appendChild(canvas);
-        canvas.style.maxWidth = '94vw';
-        canvas.style.height = 'auto';
         const btnSalir = document.createElement('button');
         btnSalir.className = 'btn btn-gold';
         btnSalir.style.marginTop = '12px';
@@ -3355,14 +3437,18 @@ const filas = pagados.map(p => `<li data-numero="${etiquetar(p.numero)}"><span c
           if (banner && contBanner) { banner.remove(); contBanner.appendChild(banner); }
           contenedor.appendChild(canvas);
           canvas.style.maxWidth = '';
+          canvas.style.width = '';
           canvas.style.height = '';
-          rueda.cambiarTamano(tamRec.w, tamRec.h);
+          rueda.cambiarTamano(disp.w, disp.h);
         });
         ov.appendChild(btnSalir);
         document.body.appendChild(ov);
-        const nw = Math.min(window.innerWidth - 48, 1400);
-        const nh = Math.round(nw * tamRec.asp);
-        rueda.cambiarTamano(nw, nh);
+        // Que quepa COMPLETA en el viewport (respetando proporción) para no recortarse
+        const fdisp = fitEn(window.innerWidth - 32, window.innerHeight - 150, 300);
+        canvas.style.maxWidth = '';
+        canvas.style.width = '';
+        canvas.style.height = '';
+        rueda.cambiarTamano(fdisp.w, fdisp.h);
       });
 
       const videoUrl = await rueda.girarMultiples(resultado.ganadores[0].numero, { vueltas, duracionMs: duracionSeg * 1000, manual, onEsperaContinuar });
