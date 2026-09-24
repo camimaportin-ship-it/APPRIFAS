@@ -21,6 +21,8 @@ const bcrypt = require('bcryptjs');
 const cryptoToken = require('crypto');
 const archiver = require('archiver');
 const unzipper = require('unzipper');
+const { get } = require('@vercel/blob');
+const { handleUpload } = require('@vercel/blob/client');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const env = require('./src/config/env');
@@ -2819,10 +2821,52 @@ app.get('/api/backup', async (req, res) => {
 
 // -------------------------------- RESTORE -----------------------------------
 
-app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
+// La carga directa evita enviar backups grandes dentro del payload de la función
+// serverless (límite de Vercel). El archivo se sube primero al Blob privado y
+// solo se envía su pathname pequeño a esta función.
+app.post('/api/blob-upload', requireRole('super_admin'), async (req, res) => {
+  try {
+    const jsonResponse = await handleUpload({
+      body: req.body,
+      request: req,
+      onBeforeGenerateToken: async () => ({
+        allowedContentTypes: ['application/zip', 'application/x-sqlite3', 'application/octet-stream'],
+        maximumSizeInBytes: 200 * 1024 * 1024,
+        addRandomSuffix: true,
+        tokenPayload: JSON.stringify({ usuario: req.usuario.usuario })
+      }),
+      onUploadCompleted: async () => {}
+    });
+    res.status(200).json(jsonResponse);
+  } catch (error) {
+    console.error('[BLOB UPLOAD] Error:', error);
+    res.status(400).json({ error: 'No se pudo preparar la carga del backup' });
+  }
+});
 
-  const esZip = /\.zip$/i.test(req.file.originalname || '') || (req.file.mimetype || '').includes('zip');
+app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
+  let backupBuffer = req.file?.buffer;
+  let backupName = req.file?.originalname || '';
+  let backupMime = req.file?.mimetype || '';
+
+  if (!backupBuffer && req.body?.blobPathname) {
+    try {
+      const blob = await get(req.body.blobPathname, { access: 'private' });
+      if (!blob) return res.status(404).json({ error: 'No se encontró el backup cargado' });
+      const chunks = [];
+      for await (const chunk of blob.stream) chunks.push(Buffer.from(chunk));
+      backupBuffer = Buffer.concat(chunks);
+      backupName = req.body.fileName || req.body.blobPathname;
+      backupMime = req.body.fileType || '';
+    } catch (error) {
+      console.error('[RESTORE] Error leyendo Blob:', error);
+      return res.status(400).json({ error: 'No se pudo leer el backup cargado' });
+    }
+  }
+
+  if (!backupBuffer) return res.status(400).json({ error: 'No se envió archivo' });
+
+  const esZip = /\.zip$/i.test(backupName) || backupMime.includes('zip');
   const tmpDir = path.join(__dirname, '.restore-tmp-' + Date.now());
 
   try {

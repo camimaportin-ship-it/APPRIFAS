@@ -1709,7 +1709,7 @@ function modalPagoMasivo(rifaId) {
         <div style="display:flex; gap:8px;">
           <label style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:2px solid #22c55e; background:rgba(34,197,94,0.1); cursor:pointer; flex:1; text-align:center; justify-content:center;">
             <input type="radio" name="masivo-estado" value="pagado" checked style="display:none;" onchange="document.getElementById('campos-pago-masivo').style.display='grid';">
-            <span style="font-size:13px; font-weight:600; color:#22c55e;">✅ Pagado</span>
+            <span style="font-size:13px; font-weight:600; color:#22c55e;">��� Pagado</span>
           </label>
           <label style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:2px solid #f59e0b; background:rgba(245,158,11,0.1); cursor:pointer; flex:1; text-align:center; justify-content:center;">
             <input type="radio" name="masivo-estado" value="pendiente" style="display:none;" onchange="document.getElementById('campos-pago-masivo').style.display='none';">
@@ -5759,16 +5759,29 @@ async function ejecutarRestore() {
   text.textContent = 'Subiendo archivo...';
 
   try {
-    const fd = new FormData();
-    fd.append('backup', restoreFile);
+    const token = localStorage.getItem('rifassyc_token') || '';
+    const { upload } = await import('https://cdn.jsdelivr.net/npm/@vercel/blob@2.3.1/+esm');
+    const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
+      access: 'private',
+      handleUploadUrl: '/api/blob-upload',
+      headers: { Authorization: 'Bearer ' + token },
+      multipart: true
+    });
 
     bar.style.width = '60%';
     text.textContent = 'Reemplazando base de datos...';
 
     const res = await fetch('/api/restore', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('rifassyc_token') || '') },
-      body: fd
+      headers: {
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        blobPathname: blob.pathname,
+        fileName: restoreFile.name,
+        fileType: restoreFile.type
+      })
     });
 
     // Vercel puede devolver texto plano (por ejemplo, al superar el límite de
