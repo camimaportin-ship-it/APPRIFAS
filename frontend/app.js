@@ -5760,12 +5760,13 @@ async function ejecutarRestore() {
 
   try {
     const token = localStorage.getItem('rifassyc_token') || '';
-  const blobClient = await import('https://esm.sh/@vercel/blob@2.3.1/client');
-  const upload = blobClient.upload || blobClient.default?.upload;
-  if (typeof upload !== 'function') {
-  throw new Error('La integración de almacenamiento no está disponible. Recarga la página e inténtalo de nuevo.');
-  }
-  const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
+    // Importar el entrypoint de navegador explícito evita que esm.sh resuelva
+    // el entrypoint de servidor, que no expone `upload`.
+    const { upload } = await import('https://esm.sh/@vercel/blob@2.8.0/client?bundle&target=es2022');
+    if (typeof upload !== 'function') {
+      throw new Error('La integración de almacenamiento no está disponible. Recarga la página e inténtalo de nuevo.');
+    }
+    const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
   access: 'private',
   handleUploadUrl: '/api/blob-upload',
   clientPayload: JSON.stringify({ usuario: state.usuario?.usuario || '' }),
