@@ -5771,8 +5771,23 @@ async function ejecutarRestore() {
       body: fd
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al restaurar');
+    // Vercel puede devolver texto plano (por ejemplo, al superar el límite de
+    // tamaño de la función) en lugar de JSON. Leer como texto evita que el
+    // mensaje real quede oculto detrás de "Unexpected token".
+    const responseText = await res.text();
+    let data = null;
+    try {
+      data = responseText ? JSON.parse(responseText) : null;
+    } catch (_) {
+      data = null;
+    }
+    if (!res.ok) {
+      const mensaje = data?.error || responseText?.trim() || `Error HTTP ${res.status}`;
+      throw new Error(mensaje);
+    }
+    if (!data?.ok) {
+      throw new Error(data?.error || 'La restauración no fue confirmada por el servidor');
+    }
 
     bar.style.width = '100%';
     text.textContent = '✅ Restaurado correctamente. Recargando...';
