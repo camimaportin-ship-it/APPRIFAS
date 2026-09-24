@@ -5760,7 +5760,7 @@ async function ejecutarRestore() {
 
   try {
     const token = localStorage.getItem('rifassyc_token') || '';
-    const { upload } = await import('https://cdn.jsdelivr.net/npm/@vercel/blob@2.3.1/+esm');
+    const { upload } = await import('https://cdn.jsdelivr.net/npm/@vercel/blob@2.3.1/client/+esm');
     const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
       access: 'private',
       handleUploadUrl: '/api/blob-upload',
