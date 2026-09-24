@@ -131,7 +131,9 @@ class StatementWrapper {
 
 async function initDB() {
   const SQL = await initSqlJs({
-    locateFile: (file) => path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file),
+    // En Vercel, node_modules no siempre incluye archivos WASM en el bundle.
+    // El recurso se versiona en assets para que la función serverless lo encuentre.
+    locateFile: (file) => path.join(__dirname, '..', 'assets', file),
   });
   let rawDb;
   if (fs.existsSync(dbPath)) {
