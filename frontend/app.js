@@ -214,6 +214,15 @@ function cerrarCambiarPassword() {
   const modal = document.getElementById('modal-cambiar-pass');
   if (modal) modal.style.display = 'none';
 }
+
+const cambiarPasswordForm = document.getElementById('form-cambiar-pass');
+if (cambiarPasswordForm) {
+  cambiarPasswordForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    guardarCambiarPassword();
+  });
+}
+
 async function guardarCambiarPassword() {
   const actual = document.getElementById('cp-actual').value;
   const nueva = document.getElementById('cp-nueva').value;

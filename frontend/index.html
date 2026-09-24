@@ -195,6 +195,7 @@
   <div style="width:100%; max-width:420px; background:#16213F; border:1px solid #22315A; border-radius:18px; padding:28px 26px; box-sizing:border-box;">
     <h3 style="color:#fff; font-size:20px; font-weight:800; margin-bottom:4px;">🔑 Cambiar contraseña</h3>
     <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:20px;">Se cerrarán todas las sesiones activas al guardar.</p>
+    <form id="form-cambiar-pass" novalidate>
     <div style="margin-bottom:14px;">
       <label style="display:block; color:rgba(255,255,255,0.7); font-size:12px; font-weight:600; margin-bottom:6px;">Contraseña actual</label>
       <input id="cp-actual" type="password" autocomplete="current-password"
@@ -212,9 +213,13 @@
     </div>
     <div id="cp-error" style="display:none; margin-bottom:14px; padding:10px 14px; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fca5a5; font-size:13px;"></div>
     <div style="display:flex; gap:10px;">
-      <button onclick="cerrarCambiarPassword()" style="flex:1; padding:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:14px; font-weight:600; cursor:pointer;">Cancelar</button>
-      <button id="cp-guardar" onclick="guardarCambiarPassword()" style="flex:1; padding:12px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:10px; color:#0B1229; font-size:14px; font-weight:700; cursor:pointer;">Guardar</button>
+      <button type="button" onclick="cerrarCambiarPassword()" style="flex:1; padding:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#fff; font-size:14px; font-weight:600; cursor:pointer;">Cancelar</button>
+      <button type="submit" id="cp-guardar" style="flex:1; padding:12px; background:linear-gradient(135deg,#D4A017,#F2C14E); border:none; border-radius:10px; color:#0B1229; font-size:14px; font-weight:700; cursor:pointer;">Guardar</button>
     </div>
+    </form>
+    </div>
+  </div>
+</div>
   </div>
 </div>
 
