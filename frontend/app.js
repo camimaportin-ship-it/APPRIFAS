@@ -5769,7 +5769,10 @@ async function ejecutarRestore() {
     const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
   access: 'private',
   handleUploadUrl: '/api/blob-upload',
-  clientPayload: JSON.stringify({ usuario: state.usuario?.usuario || '' }),
+  clientPayload: JSON.stringify({
+  usuario: state.usuario?.usuario || '',
+  authToken: token
+  }),
   });
 
     bar.style.width = '60%';
