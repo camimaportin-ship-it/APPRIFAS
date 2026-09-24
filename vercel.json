@@ -10,7 +10,7 @@
   "env": {
     "PUPPETEER_SKIP_DOWNLOAD": "true"
   },
-  "installCommand": "PUPPETEER_SKIP_DOWNLOAD=true npm install",
+  "installCommand": "PUPPETEER_SKIP_DOWNLOAD=true npm install --ignore-scripts",
   "routes": [
     { "src": "/(.*)", "dest": "/api/index.js" }
   ]
