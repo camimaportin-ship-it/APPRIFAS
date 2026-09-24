@@ -2840,7 +2840,11 @@ app.post('/api/blob-upload', async (req, res) => {
             : (clientPayload || {});
         } catch (_) {}
 
-        const sesion = obtenerSesion(payload.authToken);
+        const authHeader = req.headers.authorization || '';
+        const bearerToken = authHeader.startsWith('Bearer ')
+          ? authHeader.slice(7)
+          : '';
+        const sesion = obtenerSesion(bearerToken || payload.authToken);
         if (!sesion || sesion.rol !== 'super_admin') {
           throw new Error('No autorizado');
         }
