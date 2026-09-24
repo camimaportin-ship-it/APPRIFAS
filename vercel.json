@@ -7,6 +7,9 @@
       "includeFiles": ["assets/sql-wasm.wasm"]
     }
   }],
+  "env": {
+    "PUPPETEER_SKIP_DOWNLOAD": "true"
+  },
   "routes": [
     { "src": "/(.*)", "dest": "/api/index.js" }
   ]
