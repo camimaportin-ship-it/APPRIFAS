@@ -126,8 +126,32 @@ app.use(express.static(path.join(__dirname, 'frontend')));
 // Fase 1.2: sobrevive a reinicios de Railway y a múltiples réplicas si comparten volumen.
 const sesionesActivas = new Map(); // token → { usuario, nombre, rol, exp } — caché
 
-function crearToken() {
-  return cryptoToken.randomBytes(32).toString('hex');
+// Tokens autocontenidos: Vercel puede atender cada petición en una instancia
+// distinta, por lo que una sesión no puede depender únicamente de SQLite o RAM.
+const AUTH_SECRET = process.env.AUTH_SECRET || process.env.ADMIN_SEED_PASS || 'rifassyc-auth-secret-change-me';
+function crearToken(data) {
+  const payload = Buffer.from(JSON.stringify({
+    usuario: data.usuario,
+    nombre: data.nombre,
+    rol: data.rol,
+    exp: data.exp,
+    nonce: cryptoToken.randomBytes(16).toString('hex')
+  })).toString('base64url');
+  const firma = cryptoToken.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+  return `${payload}.${firma}`;
+}
+function obtenerSesionFirmada(token) {
+  const partes = String(token || '').split('.');
+  if (partes.length !== 2) return null;
+  const [payload, firma] = partes;
+  const esperada = cryptoToken.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+  const a = Buffer.from(firma);
+  const b = Buffer.from(esperada);
+  if (a.length !== b.length || !cryptoToken.timingSafeEqual(a, b)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return data && data.usuario && data.exp && Date.now() <= Number(data.exp) ? data : null;
+  } catch (e) { return null; }
 }
 function guardarSesion(token, data) {
   sesionesActivas.set(token, data);
@@ -138,6 +162,12 @@ function obtenerSesion(token) {
   const cached = sesionesActivas.get(token);
   if (cached && Date.now() <= cached.exp) return cached;
   if (cached) sesionesActivas.delete(token);
+  // Recuperar la sesión aunque la petición llegue a otra instancia serverless.
+  const firmada = obtenerSesionFirmada(token);
+  if (firmada) {
+    sesionesActivas.set(token, firmada);
+    return firmada;
+  }
   try {
     const row = db.prepare('SELECT * FROM sesiones WHERE token = ?').get(token);
     if (row && Date.now() <= Number(row.exp)) {
@@ -191,14 +221,15 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
     }
     // Éxito: limpiar intentos y crear sesión
     intentosFallidos.delete(usuario);
-    const token = crearToken();
     const duracion = remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000; // 30 días o 24 h
-    guardarSesion(token, {
+    const datosSesion = {
       usuario: user.usuario,
       nombre: user.nombre,
       rol: user.rol,
       exp: Date.now() + duracion
-    });
+    };
+    const token = crearToken(datosSesion);
+    guardarSesion(token, datosSesion);
     registrarLog('login', 'usuario', user.id, user.usuario, `Login exitoso desde sesión ${token.slice(0, 8)}...`, user.usuario);
     res.json({ ok: true, token, usuario: user.usuario, nombre: user.nombre, rol: user.rol, expiraEn: duracion });
   } catch (err) {
