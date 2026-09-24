@@ -2896,7 +2896,7 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
       // Extraer el .zip (rifas.db + uploads/) en un directorio temporal
       fs.mkdirSync(tmpDir, { recursive: true });
       const tmpZip = path.join(tmpDir, 'backup.zip');
-      fs.writeFileSync(tmpZip, req.file.buffer);
+        fs.writeFileSync(tmpZip, backupBuffer);
       await new Promise((resolve, reject) => {
         fs.createReadStream(tmpZip)
           .pipe(unzipper.Extract({ path: tmpDir }))
@@ -2916,7 +2916,7 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
       }
     } else {
       // Respaldo clásico: solo el .db
-      fs.writeFileSync(dbPath, req.file.buffer);
+      fs.writeFileSync(dbPath, backupBuffer);
     }
 
     // Reiniciar conexión
