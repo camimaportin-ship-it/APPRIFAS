@@ -1709,7 +1709,7 @@ function modalPagoMasivo(rifaId) {
         <div style="display:flex; gap:8px;">
           <label style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:2px solid #22c55e; background:rgba(34,197,94,0.1); cursor:pointer; flex:1; text-align:center; justify-content:center;">
             <input type="radio" name="masivo-estado" value="pagado" checked style="display:none;" onchange="document.getElementById('campos-pago-masivo').style.display='grid';">
-            <span style="font-size:13px; font-weight:600; color:#22c55e;">��� Pagado</span>
+            <span style="font-size:13px; font-weight:600; color:#22c55e;">����� Pagado</span>
           </label>
           <label style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:2px solid #f59e0b; background:rgba(245,158,11,0.1); cursor:pointer; flex:1; text-align:center; justify-content:center;">
             <input type="radio" name="masivo-estado" value="pendiente" style="display:none;" onchange="document.getElementById('campos-pago-masivo').style.display='none';">
@@ -5767,9 +5767,10 @@ async function ejecutarRestore() {
       throw new Error('La integración de almacenamiento no está disponible. Recarga la página e inténtalo de nuevo.');
     }
     const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
-  access: 'private',
-  handleUploadUrl: '/api/blob-upload',
-  clientPayload: JSON.stringify({
+      access: 'private',
+      handleUploadUrl: '/api/blob-upload',
+      headers: { Authorization: 'Bearer ' + token },
+      clientPayload: JSON.stringify({
   usuario: state.usuario?.usuario || '',
   authToken: token
   }),
