@@ -130,7 +130,9 @@ class StatementWrapper {
 // ---- Inicialización asincrónica (carga WASM) --------------------------------
 
 async function initDB() {
-  const SQL = await initSqlJs();
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file),
+  });
   let rawDb;
   if (fs.existsSync(dbPath)) {
     const buffer = fs.readFileSync(dbPath);
