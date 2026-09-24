@@ -5760,13 +5760,16 @@ async function ejecutarRestore() {
 
   try {
     const token = localStorage.getItem('rifassyc_token') || '';
-    const { upload } = await import('https://cdn.jsdelivr.net/npm/@vercel/blob@2.3.1/client/+esm');
-    const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
-      access: 'private',
-      handleUploadUrl: '/api/blob-upload',
-      headers: { Authorization: 'Bearer ' + token },
-      multipart: true
-    });
+  const blobClient = await import('https://esm.sh/@vercel/blob@2.3.1/client');
+  const upload = blobClient.upload || blobClient.default?.upload;
+  if (typeof upload !== 'function') {
+  throw new Error('La integración de almacenamiento no está disponible. Recarga la página e inténtalo de nuevo.');
+  }
+  const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
+  access: 'private',
+  handleUploadUrl: '/api/blob-upload',
+  clientPayload: JSON.stringify({ usuario: state.usuario?.usuario || '' }),
+  });
 
     bar.style.width = '60%';
     text.textContent = 'Reemplazando base de datos...';
