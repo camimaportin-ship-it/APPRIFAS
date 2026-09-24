@@ -196,6 +196,8 @@
     <h3 style="color:#fff; font-size:20px; font-weight:800; margin-bottom:4px;">🔑 Cambiar contraseña</h3>
     <p style="color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:20px;">Se cerrarán todas las sesiones activas al guardar.</p>
     <form id="form-cambiar-pass" novalidate>
+    <input id="cp-usuario" name="username" type="text" autocomplete="username" tabindex="-1" aria-hidden="true" readonly
+      style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;">
     <div style="margin-bottom:14px;">
       <label style="display:block; color:rgba(255,255,255,0.7); font-size:12px; font-weight:600; margin-bottom:6px;">Contraseña actual</label>
       <input id="cp-actual" type="password" autocomplete="current-password"
