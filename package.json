@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.7",
+    "@vercel/blob": "^2.8.0",
     "archiver": "^7.0.1",
     "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
