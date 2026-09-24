@@ -37,7 +37,7 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
   if (topbar) topbar.innerHTML = `
     <div class="flex gap-2">
       <span class="badge badge-${rifa.estado}">${BADGE_ESTADO[rifa.estado]}</span>
-      <a href="#/rifas/${id}/editar" class="btn btn-outline btn-sm">✏️ Editar</a>
+      <a href="#rifas/${id}/editar" class="btn btn-outline btn-sm">✏️ Editar</a>
       <button class="btn btn-outline btn-sm" onclick="clonarRifa(${id})">📋 Clonar</button>
       <button class="btn btn-danger btn-sm" onclick="eliminarRifa(${id})">🗑️ Eliminar</button>
     </div>`;
@@ -54,13 +54,13 @@ export async function vistaDetalleRifaModular(id, tab, deps = {}) {
   const container = document.getElementById('view-container');
   container.innerHTML = `
     <div class="tabs">
-      ${tabs.map(([k, l]) => `<a class="tab ${tab === k ? 'active' : ''}" href="#/rifas/${id}/${k}">${l}</a>`).join('')}
+      ${tabs.map(([k, l]) => `<a class="tab ${tab === k ? 'active' : ''}" href="#rifas/${id}/${k}">${l}</a>`).join('')}
     </div>
     <div id="tab-content"></div>
     <div class="nav-pager">
-      ${prev ? `<a class="btn btn-outline btn-sm" href="#/rifas/${id}/${prev[0]}">← ${prev[1]}</a>` : '<span></span>'}
-      <a class="btn btn-ghost btn-sm" href="#/rifas">⬅ Volver a mis rifas</a>
-      ${next ? `<a class="btn btn-gold btn-sm" href="#/rifas/${id}/${next[1]}">${next[1]} →</a>` : '<span></span>'}
+      ${prev ? `<a class="btn btn-outline btn-sm" href="#rifas/${id}/${prev[0]}">← ${prev[1]}</a>` : '<span></span>'}
+      <a class="btn btn-ghost btn-sm" href="#rifas">⬅ Volver a mis rifas</a>
+      ${next ? `<a class="btn btn-gold btn-sm" href="#rifas/${id}/${next[1]}">${next[1]} →</a>` : '<span></span>'}
     </div>`;
   const box = document.getElementById('tab-content');
 
@@ -99,7 +99,7 @@ export async function renderResumenModular(rifa, d, deps = {}) {
   let disponiblesHTML;
   if (esChance) {
     disponiblesHTML = chanceLibres.length
-      ? `<div class="grilla-numeros disponibles-lista">${chanceLibres.slice(0, 120).map(b => `<button type="button" class="grilla-celda libre" onclick="window.location.hash='#/rifas/${rifa.id}/participantes'" title="Ver mapa: ${b.label}">${b.label}</button>`).join('')}</div>
+      ? `<div class="grilla-numeros disponibles-lista">${chanceLibres.slice(0, 120).map(b => `<button type="button" class="grilla-celda libre" onclick="window.location.hash='#rifas/${rifa.id}/participantes'" title="Ver mapa: ${b.label}">${b.label}</button>`).join('')}</div>
          <p class="text-xs text-ink-600 mt-2">Mostrando las primeras 120 de ${chanceLibres.length} boletas disponibles.</p>`
       : `<div class="empty-state" style="padding:20px;"><div class="icon">🎟️</div><p>No quedan boletas disponibles</p></div>`;
   } else if (esCuatro) {
@@ -119,10 +119,10 @@ export async function renderResumenModular(rifa, d, deps = {}) {
   const restantesValor = esCuatro ? gruposLibres.length : d.quedan;
   return `
     <div class="quick-actions mb-4">
-      <a class="qa" href="#/rifas/${rifa.id}/participantes"><div class="qa-icon">👥</div><div><strong>Registrar / pagar</strong><span>Participantes y boletas</span></div></a>
-      <a class="qa" href="#/rifas/${rifa.id}/balotera"><div class="qa-icon">🎱</div><div><strong>${esChance ? 'Sortear chance' : 'Girar balotera'}</strong><span>${esChance ? (rifa.cifras || 4) + ' cifras + símbolo' : 'Emula la balota en vivo'}</span></div></a>
-      <a class="qa" href="#/rifas/${rifa.id}/sorteo"><div class="qa-icon">🎯</div><div><strong>Realizar sorteo</strong><span>Ruleta, lotería o tapazo</span></div></a>
-      <a class="qa" href="#/rifas/${rifa.id}/publicidad"><div class="qa-icon">📣</div><div><strong>Publicidad</strong><span>Post, historia y QR</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/participantes"><div class="qa-icon">👥</div><div><strong>Registrar / pagar</strong><span>Participantes y boletas</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/balotera"><div class="qa-icon">🎱</div><div><strong>${esChance ? 'Sortear chance' : 'Girar balotera'}</strong><span>${esChance ? (rifa.cifras || 4) + ' cifras + símbolo' : 'Emula la balota en vivo'}</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/sorteo"><div class="qa-icon">🎯</div><div><strong>Realizar sorteo</strong><span>Ruleta, lotería o tapazo</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/publicidad"><div class="qa-icon">📣</div><div><strong>Publicidad</strong><span>Post, historia y QR</span></div></a>
     </div>
 
     <div class="kpi-grid mb-4">
@@ -140,7 +140,7 @@ export async function renderResumenModular(rifa, d, deps = {}) {
     <div class="card card-pad mb-4">
       <div class="flex justify-between items-center" style="flex-wrap:wrap; gap:8px;">
         <h3 style="margin:0;">${esCuatro ? '🎯 Grupos disponibles' : '🎟️ Boletas disponibles'} <span class="text-sm text-ink-600">(${esCuatro ? `${gruposLibres.length} de ${grupos.length} grupos de ${nOport(rifa)}` : `${esChance ? chanceLibres.length : libres.length} ${esChance ? 'boletas' : 'números'}`})</span></h3>
-        <a class="btn btn-outline btn-sm" href="#/rifas/${rifa.id}/participantes">Ver mapa completo →</a>
+        <a class="btn btn-outline btn-sm" href="#rifas/${rifa.id}/participantes">Ver mapa completo →</a>
       </div>
       <div class="mt-3">
         ${disponiblesHTML}

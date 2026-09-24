@@ -1,7 +1,7 @@
 /**
  * app.js — Lógica completa del frontend (Vanilla JS, sin frameworks).
  * -----------------------------------------------------------------------------
- * Router simple por hash para el panel de administración (#/rifas, #/rifas/:id...)
+ * Router simple por hash para el panel de administración (#rifas, #rifas/:id...)
  * y un router por ruta real para la página pública (/public/rifa/:id), que es
  * la que va en el QR y debe funcionar como URL compartible normal.
  * NOTA FASE 3: Wompi/Meta son stubs ocultos (FEATURE_WOMPI=false) — quedan para futuro.
@@ -376,10 +376,10 @@ function activarNav(route) {
   const bc = document.getElementById('breadcrumb');
   if (bc) {
     const parts = route.split('/').filter(Boolean);
-    const crumbs = ['<a href="#/rifas" style="color:var(--ink-400);">Inicio</a>'];
+    const crumbs = ['<a href="#rifas" style="color:var(--ink-400);">Inicio</a>'];
     if (parts[0]==='rifas' && parts[1]==='nueva') crumbs.push('<span>Nueva rifa</span>');
     else if (parts[0]==='rifas' && parts[1]) {
-      crumbs.push('<a href="#/rifas" style="color:var(--ink-400);">Rifas</a>');
+      crumbs.push('<a href="#rifas" style="color:var(--ink-400);">Rifas</a>');
       if (parts[2]==='editar') crumbs.push('<span>Editar</span>');
       else if (parts[2]) crumbs.push('<span>'+parts[2]+'</span>');
       else crumbs.push('<span>Detalle</span>');
@@ -390,7 +390,9 @@ function activarNav(route) {
 
 async function router() {
   detenerPolling();
-  const hash = window.location.hash.replace('#/', '') || 'rifas';
+  // Accept legacy `#/ruta` links but normalize them before route parsing so
+  // preview tooling never receives an invalid `#/...` querySelector target.
+  const hash = window.location.hash.replace(/^#\/?/, '') || 'rifas';
   const parts = hash.split('/');
   const container = document.getElementById('view-container');
   activarNav(hash);
@@ -449,11 +451,11 @@ window.addEventListener('hashchange', router);
 
 // Vuelve a la vista anterior (o al listado de rifas si no hay historial)
 function volverAtras() {
-  const partes = (window.location.hash || '#/rifas').replace('#/', '').split('/');
+  const partes = (window.location.hash || '#rifas').replace('#', '').split('/');
   const actual = partes[0] === 'rifas' && partes.length === 1 ? 'rifas' : partes[0];
-  if (actual === 'rifas') { window.location.hash = '#/rifas'; return; }
+  if (actual === 'rifas') { window.location.hash = '#rifas'; return; }
   if (window.history.length > 1) window.history.back();
-  else window.location.hash = '#/rifas';
+  else window.location.hash = '#rifas';
 }
 
 // ================================================================================
@@ -472,7 +474,7 @@ async function vistaListaRifas() {
   const rifasArr = Array.isArray(rifas) ? rifas : [];
   const catsArr = Array.isArray(categorias) ? categorias : [];
   const container = document.getElementById('view-container');
-  document.getElementById('topbar-actions').innerHTML = `<a href="#/rifas/nueva" class="btn btn-gold">➕ Crear rifa</a>`;
+  document.getElementById('topbar-actions').innerHTML = `<a href="#rifas/nueva" class="btn btn-gold">➕ Crear rifa</a>`;
 
   if (rifasArr.length === 0) {
     container.innerHTML = `
@@ -480,7 +482,7 @@ async function vistaListaRifas() {
         <div class="icon">🎟️</div>
         <h3>Aún no tienes rifas</h3>
         <p class="mb-3">Crea tu primera rifa y empieza a vender boletas en minutos.</p>
-        <a href="#/rifas/nueva" class="btn btn-gold">Crear mi primera rifa</a>
+        <a href="#rifas/nueva" class="btn btn-gold">Crear mi primera rifa</a>
       </div>`;
     return;
   }
@@ -521,7 +523,7 @@ async function vistaListaRifas() {
       return `
         <div class="rifas-list">
           ${lista.map(r => `
-            <a href="#/rifas/${r.id}" class="rifas-list-item">
+            <a href="#rifas/${r.id}" class="rifas-list-item">
               <div class="rifas-list-item__icon">${r.imagen_producto ? `<img src="${r.imagen_producto}" style="width:48px;height:48px;border-radius:8px;object-fit:cover;">` : '🎁'}</div>
               <div class="rifas-list-item__info">
                 <div class="flex items-center gap-2 mb-1">
@@ -536,8 +538,8 @@ async function vistaListaRifas() {
                 <span class="text-xs text-ink-600">${r.vendidos}/${r.cantidad_max_participantes} · ${fmtCOP(r.recaudado)}</span>
               </div>
               <div class="rifas-list-item__actions">
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/rifas/${r.id}/editar'" title="Editar">✏️</button>
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/pruebas/rifa/${r.id}'" title="Previsualizar">👁️</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#rifas/${r.id}/editar'" title="Editar">✏️</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#pruebas/rifa/${r.id}'" title="Previsualizar">👁️</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); moverACarpeta('${r.id}', '${escapeHtml(r.categoria || '')}')" title="Mover a carpeta">📁</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); clonarRifa('${r.id}')" title="Clonar">📋</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); eliminarRifa('${r.id}', '${escapeHtml(r.nombre)}')" title="Eliminar" style="color:var(--red-500);">🗑️</button>
@@ -548,7 +550,7 @@ async function vistaListaRifas() {
     return `
       <div class="rifas-grid">
         ${lista.map(r => `
-          <a href="#/rifas/${r.id}" class="card card-hover" style="display:block;">
+          <a href="#rifas/${r.id}" class="card card-hover" style="display:block;">
             ${r.imagen_producto ? `<img class="rifa-card__img" src="${r.imagen_producto}">` : `<div class="rifa-card__img flex items-center justify-center" style="font-size:34px;">🎁</div>`}
             <div class="rifa-card__body">
               <div class="flex items-center justify-between mb-2">
@@ -563,7 +565,7 @@ async function vistaListaRifas() {
                 <span class="mono" style="font-weight:700; color:var(--emerald-500);">${fmtCOP(r.recaudado)}</span>
               </div>
               <div class="flex gap-2">
-                <button class="btn btn-outline btn-sm" style="flex:1; font-size:11px;" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/pruebas/rifa/${r.id}'">👁️ Previsualizar</button>
+                <button class="btn btn-outline btn-sm" style="flex:1; font-size:11px;" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#pruebas/rifa/${r.id}'">👁️ Previsualizar</button>
               </div>
             </div>
           </a>`).join('')}
@@ -632,7 +634,7 @@ async function vistaPapelera() {
         <div class="icon">🗑️</div>
         <h3>La papelera está vacía</h3>
         <p class="mb-3">Cuando elimines una rifa quedará aquí de forma temporal por si hay imprevistos. Puedes restaurarla o purgarla para siempre.</p>
-        <a href="#/rifas" class="btn btn-gold">Volver a mis rifas</a>
+        <a href="#rifas" class="btn btn-gold">Volver a mis rifas</a>
       </div>`;
     return;
   }
@@ -781,7 +783,7 @@ async function vistaLogs() {
             <tr>
               <td class="text-sm mono" style="white-space:nowrap;">${fmtLogFecha(l.fecha)}</td>
               <td style="white-space:nowrap;">${badgeLog(l.accion)}</td>
-              <td>${l.rifa_nombre ? `<a class="text-link" href="#/rifas/${l.rifa_id}">${escapeHtml(l.rifa_nombre)}</a> <span class="text-xs text-ink-600">#${l.rifa_id}</span>` : '<span class="text-xs text-ink-600">(rifa eliminada)</span>'}</td>
+              <td>${l.rifa_nombre ? `<a class="text-link" href="#rifas/${l.rifa_id}">${escapeHtml(l.rifa_nombre)}</a> <span class="text-xs text-ink-600">#${l.rifa_id}</span>` : '<span class="text-xs text-ink-600">(rifa eliminada)</span>'}</td>
               <td class="text-sm">${escapeHtml(l.detalle || '')}</td>
               ${state.usuario?.rol === 'super_admin' ? `<td class="text-sm">${escapeHtml(l.usuario || '—')}</td>` : ''}
             </tr>`).join('')}
@@ -992,7 +994,7 @@ function renderFormularioRifa(rifa) {
     <div class="flex gap-3">
       <button type="submit" class="btn btn-outline" data-estado="borrador">Guardar como borrador</button>
       <button type="submit" class="btn btn-gold" data-estado="activa">Guardar y activar</button>
-      <a href="#/rifas" class="btn btn-ghost">Cancelar</a>
+      <a href="#rifas" class="btn btn-ghost">Cancelar</a>
     </div>
   </form>`;
 }
@@ -1274,7 +1276,7 @@ function bindFormularioRifa(rifa) {
         ? await apiForm('/rifas/' + rifa.id, fd, 'PUT')
         : await apiForm('/rifas', fd, 'POST');
       toast(rifa ? 'Rifa actualizada' : 'Rifa creada correctamente');
-      window.location.hash = rifa ? '#/rifas/' + guardado.id + '/participantes' : '#/rifas/' + guardado.id;
+      window.location.hash = rifa ? '#rifas/' + guardado.id + '/participantes' : '#rifas/' + guardado.id;
     } catch (err) { toast(err.message, 'error'); }
   });
 }
@@ -1310,7 +1312,7 @@ async function vistaDetalleRifa(id, tab) {
   document.getElementById('topbar-actions').innerHTML = `
     <div class="flex gap-2">
       <span class="badge badge-${rifa.estado}">${BADGE_ESTADO[rifa.estado]}</span>
-      <a href="#/rifas/${id}/editar" class="btn btn-outline btn-sm">✏️ Editar</a>
+      <a href="#rifas/${id}/editar" class="btn btn-outline btn-sm">✏️ Editar</a>
       <button class="btn btn-outline btn-sm" onclick="clonarRifa(${id})">📋 Clonar</button>
       <button class="btn btn-danger btn-sm" onclick="eliminarRifa(${id})">🗑️ Eliminar</button>
     </div>`;
@@ -1326,13 +1328,13 @@ async function vistaDetalleRifa(id, tab) {
 
   document.getElementById('view-container').innerHTML = `
     <div class="tabs">
-      ${tabs.map(([k, l]) => `<a class="tab ${tab === k ? 'active' : ''}" href="#/rifas/${id}/${k}">${l}</a>`).join('')}
+      ${tabs.map(([k, l]) => `<a class="tab ${tab === k ? 'active' : ''}" href="#rifas/${id}/${k}">${l}</a>`).join('')}
     </div>
     <div id="tab-content"></div>
     <div class="nav-pager">
-      ${prev ? `<a class="btn btn-outline btn-sm" href="#/rifas/${id}/${prev[0]}">← ${prev[1]}</a>` : '<span></span>'}
-      <a class="btn btn-ghost btn-sm" href="#/rifas">⬅ Volver a mis rifas</a>
-      ${next ? `<a class="btn btn-gold btn-sm" href="#/rifas/${id}/${next[0]}">${next[1]} →</a>` : '<span></span>'}
+      ${prev ? `<a class="btn btn-outline btn-sm" href="#rifas/${id}/${prev[0]}">← ${prev[1]}</a>` : '<span></span>'}
+      <a class="btn btn-ghost btn-sm" href="#rifas">⬅ Volver a mis rifas</a>
+      ${next ? `<a class="btn btn-gold btn-sm" href="#rifas/${id}/${next[0]}">${next[1]} →</a>` : '<span></span>'}
     </div>`;
 
   const box = document.getElementById('tab-content');
@@ -1364,7 +1366,7 @@ async function renderResumen(rifa, d) {
   let disponiblesHTML;
   if (esChance) {
     disponiblesHTML = chanceLibres.length
-      ? `<div class="grilla-numeros disponibles-lista">${chanceLibres.slice(0, 120).map(b => `<button type="button" class="grilla-celda libre" onclick="window.location.hash='#/rifas/${rifa.id}/participantes'" title="Ver mapa: ${b.label}">${b.label}</button>`).join('')}</div>
+      ? `<div class="grilla-numeros disponibles-lista">${chanceLibres.slice(0, 120).map(b => `<button type="button" class="grilla-celda libre" onclick="window.location.hash='#rifas/${rifa.id}/participantes'" title="Ver mapa: ${b.label}">${b.label}</button>`).join('')}</div>
          <p class="text-xs text-ink-600 mt-2">Mostrando las primeras 120 de ${chanceLibres.length} boletas disponibles.</p>`
       : `<div class="empty-state" style="padding:20px;"><div class="icon">🎟️</div><p>No quedan boletas disponibles</p></div>`;
   } else if (esCuatro) {
@@ -1384,10 +1386,10 @@ async function renderResumen(rifa, d) {
   const restantesValor = esCuatro ? gruposLibres.length : d.quedan;
   return `
     <div class="quick-actions mb-4">
-      <a class="qa" href="#/rifas/${rifa.id}/participantes"><div class="qa-icon">👥</div><div><strong>Registrar / pagar</strong><span>Participantes y boletas</span></div></a>
-      <a class="qa" href="#/rifas/${rifa.id}/balotera"><div class="qa-icon">🎱</div><div><strong>${esChance ? 'Sortear chance' : 'Girar balotera'}</strong><span>${esChance ? (rifa.cifras || 4) + ' cifras + símbolo' : 'Emula la balota en vivo'}</span></div></a>
-      <a class="qa" href="#/rifas/${rifa.id}/sorteo"><div class="qa-icon">🎯</div><div><strong>Realizar sorteo</strong><span>Ruleta, lotería o tapazo</span></div></a>
-      <a class="qa" href="#/rifas/${rifa.id}/publicidad"><div class="qa-icon">📣</div><div><strong>Publicidad</strong><span>Post, historia y QR</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/participantes"><div class="qa-icon">👥</div><div><strong>Registrar / pagar</strong><span>Participantes y boletas</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/balotera"><div class="qa-icon">🎱</div><div><strong>${esChance ? 'Sortear chance' : 'Girar balotera'}</strong><span>${esChance ? (rifa.cifras || 4) + ' cifras + símbolo' : 'Emula la balota en vivo'}</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/sorteo"><div class="qa-icon">🎯</div><div><strong>Realizar sorteo</strong><span>Ruleta, lotería o tapazo</span></div></a>
+      <a class="qa" href="#rifas/${rifa.id}/publicidad"><div class="qa-icon">📣</div><div><strong>Publicidad</strong><span>Post, historia y QR</span></div></a>
     </div>
 
     <div class="kpi-grid mb-4">
@@ -1405,7 +1407,7 @@ async function renderResumen(rifa, d) {
     <div class="card card-pad mb-4">
       <div class="flex justify-between items-center" style="flex-wrap:wrap; gap:8px;">
         <h3 style="margin:0;">${esCuatro ? '🎯 Grupos disponibles' : '🎟️ Boletas disponibles'} <span class="text-sm text-ink-600">(${esCuatro ? `${gruposLibres.length} de ${grupos.length} grupos de ${nOport(rifa)}` : `${esChance ? chanceLibres.length : libres.length} ${esChance ? 'boletas' : 'números'}`})</span></h3>
-        <a class="btn btn-outline btn-sm" href="#/rifas/${rifa.id}/participantes">Ver mapa completo →</a>
+        <a class="btn btn-outline btn-sm" href="#rifas/${rifa.id}/participantes">Ver mapa completo →</a>
       </div>
       <div class="mt-3">
         ${disponiblesHTML}
@@ -3013,7 +3015,7 @@ async function clonarRifa(id) {
   try {
     const nueva = await api('/rifas/' + id + '/clonar', { method: 'POST' });
     toast('Rifa clonada como borrador');
-    window.location.hash = '#/rifas/' + nueva.id + '/editar';
+    window.location.hash = '#rifas/' + nueva.id + '/editar';
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -3024,7 +3026,7 @@ async function eliminarRifa(id, nombre) {
   try {
     await api('/rifas/' + id, { method: 'DELETE' });
     toast('Rifa movida a la papelera');
-    window.location.hash = '#/rifas';
+    window.location.hash = '#rifas';
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -3212,7 +3214,7 @@ async function renderSorteoTab(rifa, box) {
       <div style="font-size:40px;">🎰</div>
       <h3 class="mb-2">Esta rifa se sortea por Chance con Símbolo</h3>
       <p class="text-sm text-ink-600 mb-3">El sorteo de ${rifa.cifras || 4} cifras + símbolo se hace desde la balotera.</p>
-      <a href="#/rifas/${rifa.id}/balotera" class="btn btn-gold">🎰 Ir a la balotera</a>
+      <a href="#rifas/${rifa.id}/balotera" class="btn btn-gold">🎰 Ir a la balotera</a>
     </div>`;
     return;
   }
@@ -3227,7 +3229,7 @@ async function renderSorteoTab(rifa, box) {
       <h3 class="mb-2">Esta rifa ya fue sorteada</h3>
       ${ganadores.map(g => `<p class="mb-1">Número ganador: <strong class="mono" style="font-size:20px; color:var(--gold-500);">#${fmtNum(rifa, g.numero)}</strong> — ${escapeHtml(g.nombre || '')}</p>`).join('')}
       <p class="text-xs text-ink-600 mt-2">Semilla de transparencia: <span class="mono">${ganadores[0].semilla}</span></p>
-      <a href="#/rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial completo</a>
+      <a href="#rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial completo</a>
     </div>`;
     return;
   }
@@ -3765,7 +3767,7 @@ async function renderPruebaRifa(container, rifaId) {
     container.innerHTML = `
       <div class="card card-pad mb-3" style="max-width:700px;">
         <div class="flex items-center gap-3 mb-3">
-          <a href="#/rifas/${rifaId}" class="btn btn-ghost btn-sm">← Volver</a>
+          <a href="#rifas/${rifaId}" class="btn btn-ghost btn-sm">← Volver</a>
           <div>
             <h3>Previsualizar: ${escapeHtml(rifa.nombre)}</h3>
             <p class="text-xs text-ink-600">${esChance ? 'Chance con símbolo' : esNormal ? 'Boletas normales' : '4 Oportunidades'} · ${pagados.length} pagados · Rango ${rifa.rango_min}-${rifa.rango_max}</p>
@@ -3884,7 +3886,7 @@ async function renderBaloteraTab(rifa, box) {
         <h3 class="mb-2">¡Chance sorteado!</h3>
         ${ganadores.map(g => `<p style="font-size:22px; font-weight:700; color:var(--gold-500);">${escapeHtml(g.premio || 'Premio')}: ${g.simbolo ? ticketDisplay(g.numero, g.simbolo) : g.numero} — ${escapeHtml(g.nombre || 'Sin ganador')}</p>`).join('')}
         <p class="text-xs text-ink-600 mt-2">Semilla verificable: <span class="mono">${ganadores[0].semilla}</span></p>
-        <a href="#/rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial</a>
+        <a href="#rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial</a>
       </div>`;
     } else {
       box.innerHTML = `<div class="card card-pad text-center">
@@ -3892,7 +3894,7 @@ async function renderBaloteraTab(rifa, box) {
         <h3 class="mb-2">¡Esta rifa ya tiene ganador!</h3>
         ${ganadores.map(g => `<p style="font-size:26px; font-weight:700; color:var(--gold-500);">GANADOR: ${fmtNum(rifa, g.numero)} — ${escapeHtml(g.nombre || '')}</p>`).join('')}
         <p class="text-xs text-ink-600 mt-2">Semilla verificable: <span class="mono">${ganadores[0].semilla}</span></p>
-        <a href="#/rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial</a>
+        <a href="#rifas/${rifa.id}/historial" class="btn btn-outline btn-sm mt-3">Ver historial</a>
       </div>`;
     }
     setTimeout(() => confetti({ particleCount: 140, spread: 100, origin: { y: 0.4 } }), 200);
@@ -4671,7 +4673,7 @@ async function renderWhatsappTab(rifa, box) {
           <select class="input" id="sel-plantilla-envio">
             ${plantillas.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('')}
           </select>
-          <span class="hint">Variables: {{nombre}}, {{numeros}}, {{rifa_nombre}}, {{link_pago}}, {{fecha_sorteo}}. Edítalas en <a href="#/plantillas">💬 Plantillas WhatsApp</a>.</span>
+          <span class="hint">Variables: {{nombre}}, {{numeros}}, {{rifa_nombre}}, {{link_pago}}, {{fecha_sorteo}}. Edítalas en <a href="#plantillas">💬 Plantillas WhatsApp</a>.</span>
         </div>
         <div class="field">
           <label>Enviar a</label>
@@ -5332,7 +5334,7 @@ async function renderAdminDashboard(container) {
                   const total = r.cantidad_max_participantes || r.vendidos || 0;
                   const pct = fmtPct(r.vendidos, total);
                   const estadoCls = r.estado === 'activa' ? 'badge-pagado' : r.estado === 'sorteada' ? 'badge-borrador' : 'badge-cerrada';
-                  return `<tr style="border-bottom:1px solid var(--line); cursor:pointer;" onclick="window.location.hash='#/rifas/${r.id}/resumen'">
+                  return `<tr style="border-bottom:1px solid var(--line); cursor:pointer;" onclick="window.location.hash='#rifas/${r.id}/resumen'">
                     <td style="padding:10px 12px; font-weight:600;">${escapeHtml(r.nombre)}</td>
                     <td style="padding:10px 12px;">${escapeHtml(r.producto)}</td>
                     <td style="padding:10px 12px;"><span class="text-xs">${escapeHtml(r.modalidad_boleta)}</span></td>

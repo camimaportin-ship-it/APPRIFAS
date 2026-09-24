@@ -8,32 +8,12 @@
 <meta name="theme-color" content="#0B1229">
 
 <!-- PWA -->
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="/assets/manifest-DZ5bFyhi.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%230B1229%22/><text x=%2250%22 y=%2266%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22%23D4A017%22 font-family=%22sans-serif%22>R</text></svg>">
 
-<link rel="stylesheet" href="/style.css">
 
-<script>
-// Normalize legacy hash routes before preview navigation tooling can inspect them.
-(() => {
-  const normalizeHash = (value) => value && value.startsWith('#/') ? `#${value.slice(2)}` : value;
-  const currentHash = normalizeHash(window.location.hash);
-  if (currentHash !== window.location.hash) {
-    window.history.replaceState(null, '', window.location.pathname + window.location.search + currentHash);
-  }
-
-  const normalizeLinks = (root) => {
-    const links = root.querySelectorAll ? root.querySelectorAll('a[href^="#/"]') : [];
-    links.forEach((link) => link.setAttribute('href', normalizeHash(link.getAttribute('href'))));
-  };
-  normalizeLinks(document);
-  new MutationObserver((mutations) => {
-    mutations.forEach(({ addedNodes }) => addedNodes.forEach((node) => {
-      if (node.nodeType === Node.ELEMENT_NODE) normalizeLinks(node);
-    }));
-  }).observe(document.documentElement, { childList: true, subtree: true });
-})();
-</script>
+  <script type="module" crossorigin src="/assets/index-DbzqvuxJ.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CyRkW3dc.css">
 </head>
 <body>
 <a href="#view-container" class="skip-link">Saltar al contenido principal</a>
@@ -174,8 +154,7 @@
 <script src="/components/GeneradorImagen.js"></script>
 <script src="/components/BaloteraCanvas.js"></script> 
 <script src="/components/Balotera4D.js"></script> 
-<script src="/components/LogicaSorteo.js"></script>
-<script type="module" src="/src/main.js"></script> 
+<script src="/components/LogicaSorteo.js"></script> 
 <script src="/app.js?v=4"></script>
 
 <script>

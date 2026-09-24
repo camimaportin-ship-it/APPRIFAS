@@ -26,7 +26,7 @@ export async function clonarRifa(id, deps = {}) {
   try {
     const nueva = await api('/rifas/' + id + '/clonar', { method: 'POST' });
     toast('Rifa clonada como borrador');
-    window.location.hash = '#/rifas/' + nueva.id + '/editar';
+    window.location.hash = '#rifas/' + nueva.id + '/editar';
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -40,6 +40,6 @@ export async function eliminarRifa(id, nombre, deps = {}) {
   try {
     await api('/rifas/' + id, { method: 'DELETE' });
     toast('Rifa movida a la papelera');
-    window.location.hash = '#/rifas';
+    window.location.hash = '#rifas';
   } catch (e) { toast(e.message, 'error'); }
 }

@@ -20,7 +20,7 @@ export async function vistaListaRifasModular(api, deps = {}) {
   const catsArr = Array.isArray(categorias) ? categorias : [];
   const container = document.getElementById('view-container');
   const topbarActions = document.getElementById('topbar-actions');
-  if (topbarActions) topbarActions.innerHTML = `<a href="#/rifas/nueva" class="btn btn-gold">➕ Crear rifa</a>`;
+  if (topbarActions) topbarActions.innerHTML = `<a href="#rifas/nueva" class="btn btn-gold">➕ Crear rifa</a>`;
 
   if (rifasArr.length === 0) {
     container.innerHTML = `
@@ -28,7 +28,7 @@ export async function vistaListaRifasModular(api, deps = {}) {
         <div class="icon">🎟️</div>
         <h3>Aún no tienes rifas</h3>
         <p class="mb-3">Crea tu primera rifa y empieza a vender boletas en minutos.</p>
-        <a href="#/rifas/nueva" class="btn btn-gold">Crear mi primera rifa</a>
+        <a href="#rifas/nueva" class="btn btn-gold">Crear mi primera rifa</a>
       </div>`;
     return;
   }
@@ -68,7 +68,7 @@ export async function vistaListaRifasModular(api, deps = {}) {
       return `
         <div class="rifas-list">
           ${lista.map(r => `
-            <a href="#/rifas/${r.id}" class="rifas-list-item">
+            <a href="#rifas/${r.id}" class="rifas-list-item">
               <div class="rifas-list-item__icon">${r.imagen_producto ? `<img src="${r.imagen_producto}" style="width:48px;height:48px;border-radius:8px;object-fit:cover;">` : '🎁'}</div>
               <div class="rifas-list-item__info">
                 <div class="flex items-center gap-2 mb-1">
@@ -83,8 +83,8 @@ export async function vistaListaRifasModular(api, deps = {}) {
                 <span class="text-xs text-ink-600">${r.vendidos}/${r.cantidad_max_participantes} · ${fmtCOP(r.recaudado)}</span>
               </div>
               <div class="rifas-list-item__actions">
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/rifas/${r.id}/editar'" title="Editar">✏️</button>
-                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/pruebas/rifa/${r.id}'" title="Previsualizar">👁️</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#rifas/${r.id}/editar'" title="Editar">✏️</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#pruebas/rifa/${r.id}'" title="Previsualizar">👁️</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); moverACarpeta('${r.id}', '${escapeHtml(r.categoria || '')}', { api, toast, router })" title="Mover a carpeta">📁</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); clonarRifa('${r.id}', { api, toast })" title="Clonar">📋</button>
                 <button class="btn btn-ghost btn-sm" onclick="event.preventDefault(); event.stopPropagation(); eliminarRifa('${r.id}', '${escapeHtml(r.nombre)}', { api, toast, state: window.state })" title="Eliminar" style="color:var(--red-500);">🗑️</button>
@@ -95,7 +95,7 @@ export async function vistaListaRifasModular(api, deps = {}) {
     return `
       <div class="rifas-grid">
         ${lista.map(r => `
-          <a href="#/rifas/${r.id}" class="card card-hover" style="display:block;">
+          <a href="#rifas/${r.id}" class="card card-hover" style="display:block;">
             ${r.imagen_producto ? `<img class="rifa-card__img" src="${r.imagen_producto}">` : `<div class="rifa-card__img flex items-center justify-center" style="font-size:34px;">🎁</div>`}
             <div class="rifa-card__body">
               <div class="flex items-center justify-between mb-2">
@@ -110,7 +110,7 @@ export async function vistaListaRifasModular(api, deps = {}) {
                 <span class="mono" style="font-weight:700; color:var(--emerald-500);">${fmtCOP(r.recaudado)}</span>
               </div>
               <div class="flex gap-2">
-                <button class="btn btn-outline btn-sm" style="flex:1; font-size:11px;" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#/pruebas/rifa/${r.id}'">👁️ Previsualizar</button>
+                <button class="btn btn-outline btn-sm" style="flex:1; font-size:11px;" onclick="event.preventDefault(); event.stopPropagation(); window.location.hash='#pruebas/rifa/${r.id}'">👁️ Previsualizar</button>
               </div>
             </div>
           </a>`).join('')}
