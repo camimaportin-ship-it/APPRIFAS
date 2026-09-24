@@ -16,11 +16,26 @@
 </head>
 <body>
 <script>
-// Hash routes use the app's client router, so keep them valid CSS fragment IDs
-// for preview tooling and browsers that resolve hash targets automatically.
-if (window.location.hash.startsWith('#/')) {
-  window.history.replaceState(null, '', window.location.pathname + window.location.search + '#' + window.location.hash.slice(2));
-}
+// Keep application hash routes valid CSS fragment IDs. Some preview runtimes
+// resolve anchor hashes with querySelector(), where `#/ruta` is invalid.
+(() => {
+  const normalizeHash = (value) => value && value.startsWith('#/') ? `#${value.slice(2)}` : value;
+  const currentHash = normalizeHash(window.location.hash);
+  if (currentHash !== window.location.hash) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + currentHash);
+  }
+
+  const normalizeLinks = (root) => {
+    const links = root.querySelectorAll ? root.querySelectorAll('a[href^="#/"]') : [];
+    links.forEach((link) => link.setAttribute('href', normalizeHash(link.getAttribute('href'))));
+  };
+  normalizeLinks(document);
+  new MutationObserver((mutations) => {
+    mutations.forEach(({ addedNodes }) => addedNodes.forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) normalizeLinks(node);
+    }));
+  }).observe(document.documentElement, { childList: true, subtree: true });
+})();
 </script>
 <a href="#view-container" class="skip-link">Saltar al contenido principal</a>
 
