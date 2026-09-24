@@ -2824,32 +2824,41 @@ app.get('/api/backup', async (req, res) => {
 // La carga directa evita enviar backups grandes dentro del payload de la función
 // serverless (límite de Vercel). El archivo se sube primero al Blob privado y
 // solo se envía su pathname pequeño a esta función.
-  app.post('/api/blob-upload', async (req, res) => {
+app.post('/api/blob-upload', async (req, res) => {
   try {
-  // @vercel/blob/client solicita este endpoint para obtener el token de subida
-  // y no reenvía automáticamente el header Authorization. El token firmado se
-  // transporta en clientPayload y se valida antes de generar credenciales Blob.
-  let clientPayload = {};
-  try { clientPayload = JSON.parse(req.body?.clientPayload || '{}'); } catch (_) {}
-  const sesion = obtenerSesion(clientPayload.authToken);
-  if (!sesion || sesion.rol !== 'super_admin') {
-  return res.status(401).json({ error: 'No autorizado' });
-  }
-  const jsonResponse = await handleUpload({
-  body: req.body,
-  request: req,
-  onBeforeGenerateToken: async () => ({
-  allowedContentTypes: ['application/zip', 'application/x-sqlite3', 'application/octet-stream'],
-  maximumSizeInBytes: 200 * 1024 * 1024,
-  addRandomSuffix: true,
-  tokenPayload: JSON.stringify({ usuario: sesion.usuario })
-  }),
-  onUploadCompleted: async () => {}
-  });
-    res.status(200).json(jsonResponse);
+    // handleUpload decodifica clientPayload y se lo entrega al callback. La
+    // autorización debe hacerse allí; validar req.body antes puede fallar porque
+    // el formato exacto del body lo controla @vercel/blob/client.
+    const jsonResponse = await handleUpload({
+      body: req.body,
+      request: req,
+      onBeforeGenerateToken: async (_pathname, clientPayload) => {
+        let payload = {};
+        try {
+          payload = typeof clientPayload === 'string'
+            ? JSON.parse(clientPayload)
+            : (clientPayload || {});
+        } catch (_) {}
+
+        const sesion = obtenerSesion(payload.authToken);
+        if (!sesion || sesion.rol !== 'super_admin') {
+          throw new Error('No autorizado');
+        }
+
+        return {
+          allowedContentTypes: ['application/zip', 'application/x-sqlite3', 'application/octet-stream'],
+          maximumSizeInBytes: 200 * 1024 * 1024,
+          addRandomSuffix: true,
+          tokenPayload: JSON.stringify({ usuario: sesion.usuario })
+        };
+      },
+      onUploadCompleted: async () => {}
+    });
+    return res.status(200).json(jsonResponse);
   } catch (error) {
+    const status = error?.message === 'No autorizado' ? 401 : 400;
     console.error('[BLOB UPLOAD] Error:', error);
-    res.status(400).json({ error: 'No se pudo preparar la carga del backup' });
+    return res.status(status).json({ error: error?.message || 'No se pudo preparar la carga del backup' });
   }
 });
 
