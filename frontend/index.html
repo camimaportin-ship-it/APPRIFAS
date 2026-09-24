@@ -15,6 +15,13 @@
 
 </head>
 <body>
+<script>
+// Hash routes use the app's client router, so keep them valid CSS fragment IDs
+// for preview tooling and browsers that resolve hash targets automatically.
+if (window.location.hash.startsWith('#/')) {
+  window.history.replaceState(null, '', window.location.pathname + window.location.search + '#' + window.location.hash.slice(2));
+}
+</script>
 <a href="#view-container" class="skip-link">Saltar al contenido principal</a>
 
 <!-- ===================== LOGIN SCREEN ===================== -->

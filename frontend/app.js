@@ -390,7 +390,9 @@ function activarNav(route) {
 
 async function router() {
   detenerPolling();
-  const hash = window.location.hash.replace('#', '') || 'rifas';
+  // Accept legacy `#/ruta` links but normalize them before route parsing so
+  // preview tooling never receives an invalid `#/...` querySelector target.
+  const hash = window.location.hash.replace(/^#\/?/, '') || 'rifas';
   const parts = hash.split('/');
   const container = document.getElementById('view-container');
   activarNav(hash);
