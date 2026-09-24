@@ -2869,7 +2869,9 @@ function intentarPuerto(puerto) {
     }
   });
 }
-intentarPuerto(PORT_BASE);
+if (!process.env.VERCEL) {
+  intentarPuerto(PORT_BASE);
+}
 
 // Revisión periódica de números vencidos (cada 10 minutos) para todas las rifas activas
 setInterval(() => {
@@ -2899,7 +2901,22 @@ function purgarPapeleraVencida() {
 }
 setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
 
+  return app;
 } // fin startApp()
 
-startApp().catch(err => { console.error('[FATAL]', err); process.exit(1); });
+const appReady = startApp();
+
+if (!process.env.VERCEL) {
+  appReady.catch(err => { console.error('[FATAL]', err); process.exit(1); });
+} else {
+  module.exports = async (req, res) => {
+    try {
+      const app = await appReady;
+      return app(req, res);
+    } catch (err) {
+      console.error('[FATAL] Vercel function initialization failed:', err);
+      return res.status(500).json({ error: 'No se pudo inicializar el servidor' });
+    }
+  };
+}
 
