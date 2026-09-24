@@ -13,11 +13,8 @@
 
 <link rel="stylesheet" href="/style.css">
 
-</head>
-<body>
 <script>
-// Keep application hash routes valid CSS fragment IDs. Some preview runtimes
-// resolve anchor hashes with querySelector(), where `#/ruta` is invalid.
+// Normalize legacy hash routes before preview navigation tooling can inspect them.
 (() => {
   const normalizeHash = (value) => value && value.startsWith('#/') ? `#${value.slice(2)}` : value;
   const currentHash = normalizeHash(window.location.hash);
@@ -37,6 +34,8 @@
   }).observe(document.documentElement, { childList: true, subtree: true });
 })();
 </script>
+</head>
+<body>
 <a href="#view-container" class="skip-link">Saltar al contenido principal</a>
 
 <!-- ===================== LOGIN SCREEN ===================== -->
