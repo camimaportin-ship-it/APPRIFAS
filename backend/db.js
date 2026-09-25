@@ -14,9 +14,9 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 // ---- Wrapper que emula la API de better-sqlite3 sobre sql.js ---------------
 
 class SqlJsWrapper {
-  constructor(sqlJsDb) {
+  constructor(sqlJsDb, persistencePath = dbPath) {
     this._db = sqlJsDb;
-    this._path = dbPath;
+    this._path = persistencePath;
     this._inTransaction = false;
   }
 
@@ -129,20 +129,20 @@ class StatementWrapper {
 
 // ---- Inicialización asincrónica (carga WASM) --------------------------------
 
-async function initDB() {
+  async function initDB(sourcePath = dbPath, persistencePath = sourcePath) {
   const SQL = await initSqlJs({
     // En Vercel, node_modules no siempre incluye archivos WASM en el bundle.
     // El recurso se versiona en assets para que la función serverless lo encuentre.
     locateFile: (file) => path.join(__dirname, '..', 'assets', file),
   });
   let rawDb;
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
+  if (fs.existsSync(sourcePath)) {
+  const buffer = fs.readFileSync(sourcePath);
     rawDb = new SQL.Database(buffer);
   } else {
     rawDb = new SQL.Database();
   }
-  const db = new SqlJsWrapper(rawDb);
+  const db = new SqlJsWrapper(rawDb, persistencePath);
   // Fase 2.1 — PRAGMAs de integridad/performance (best-effort en sql.js)
   try { db.exec('PRAGMA foreign_keys = ON'); } catch (e) {}
   try { db.exec('PRAGMA journal_mode = WAL'); } catch (e) {}

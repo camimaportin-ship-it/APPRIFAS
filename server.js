@@ -990,7 +990,7 @@ app.get('/api/changelog', (req, res) => {
           'Se regenera tras cada intento fallido',
           'Animación shake en respuesta incorrecta'
         ]},
-        { nombre: 'Backend — Video balotera', icono: '🎥', items: [
+        { nombre: 'Backend ��� Video balotera', icono: '🎥', items: [
           'BaloteraCanvas: métodos iniciarGrabacion() y detenerGrabacion()'
         ]},
         { nombre: 'Administración de usuarios', icono: '👥', items: [
@@ -2911,8 +2911,11 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
       const dbExtraido = path.join(tmpDir, 'rifas.db');
       if (!fs.existsSync(dbExtraido)) throw new Error('El archivo .zip no contiene rifas.db');
       // Reemplazar la base de datos
-      fs.copyFileSync(dbExtraido, dbPath);
-      // Volcar las imágenes/pósters sobre uploads/
+  // En Vercel /var/task es de solo lectura. Reabrir la base restaurada
+  // directamente desde el archivo temporal evita copiarla al bundle.
+  db = await initDB(dbExtraido, dbExtraido);
+  ensureSchema(db);
+  // Volcar las imágenes/pósters sobre uploads/
       const uploadsExtraido = path.join(tmpDir, 'uploads');
       if (fs.existsSync(uploadsExtraido)) {
         for (const f of fs.readdirSync(uploadsExtraido)) {
@@ -2920,13 +2923,12 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
         }
       }
     } else {
-      // Respaldo clásico: solo el .db
-      fs.writeFileSync(dbPath, backupBuffer);
+      // El backup .db también se abre desde /tmp; /var/task es solo lectura.
+      const dbRestaurada = path.join(tmpDir, 'rifas.db');
+      fs.writeFileSync(dbRestaurada, backupBuffer);
+      db = await initDB(dbRestaurada, dbRestaurada);
+      ensureSchema(db);
     }
-
-    // Reiniciar conexión
-    db = await initDB();
-    ensureSchema(db);
 
     console.log('[RESTORE] Base de datos restaurada correctamente');
     res.json({ ok: true, mensaje: 'Base de datos restaurada correctamente' });
