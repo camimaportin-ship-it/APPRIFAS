@@ -79,9 +79,10 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Carpeta de imágenes subidas (producto y banner de empresa)
-const uploadsDir = path.join(__dirname, 'uploads');
-fs.mkdirSync(uploadsDir, { recursive: true });
-app.use('/uploads', express.static(uploadsDir));
+let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
+  if (process.env.VERCEL) uploadsDir = path.join(os.tmpdir(), 'rifas-uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  app.use('/uploads', (req, res, next) => express.static(uploadsDir)(req, res, next));
 
 // Health — Fase 2
 app.get('/health', (req, res) => res.json({ ok: true, version: '2.2.0', uptime: process.uptime(), db: fs.existsSync(dbPath) ? 'ok' : 'missing' }));
@@ -652,7 +653,7 @@ function totalTicketsChance(rifa) {
   return 100 * simbolosRifa(rifa).length;
 }
 
-// Etiqueta de boleta CHANCE: "47 😁" o "0047 😁" (según cifras)
+// Etiqueta de boleta CHANCE: "47 😁" o "0047 ���" (según cifras)
 function ticketLabel(numero, simbolo, rifa) {
   const padded = rifa ? fmtNumero(rifa, numero) : String(numero).padStart(2, '0');
   return padded + (simbolo ? ' ' + simbolo : '');
@@ -990,7 +991,7 @@ app.get('/api/changelog', (req, res) => {
           'Se regenera tras cada intento fallido',
           'Animación shake en respuesta incorrecta'
         ]},
-        { nombre: 'Backend ��� Video balotera', icono: '🎥', items: [
+        { nombre: 'Backend ����� Video balotera', icono: '🎥', items: [
           'BaloteraCanvas: métodos iniciarGrabacion() y detenerGrabacion()'
         ]},
         { nombre: 'Administración de usuarios', icono: '👥', items: [
@@ -2876,9 +2877,15 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
     try {
       const blob = await get(req.body.blobPathname, { access: 'private' });
       if (!blob) return res.status(404).json({ error: 'No se encontró el backup cargado' });
+      const maxBackupBytes = 200 * 1024 * 1024;
       const chunks = [];
-      for await (const chunk of blob.stream) chunks.push(Buffer.from(chunk));
-      backupBuffer = Buffer.concat(chunks);
+      let totalBytes = 0;
+      for await (const chunk of blob.stream) {
+        totalBytes += chunk.length;
+        if (totalBytes > maxBackupBytes) throw new Error('El backup supera el límite de 200 MB');
+        chunks.push(Buffer.from(chunk));
+      }
+      backupBuffer = Buffer.concat(chunks, totalBytes);
       backupName = req.body.fileName || req.body.blobPathname;
       backupMime = req.body.fileType || '';
     } catch (error) {
@@ -2902,12 +2909,33 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
       // Extraer el .zip (rifas.db + uploads/) en un directorio temporal
       const tmpZip = path.join(tmpDir, 'backup.zip');
         fs.writeFileSync(tmpZip, backupBuffer);
-      await new Promise((resolve, reject) => {
-        fs.createReadStream(tmpZip)
-          .pipe(unzipper.Extract({ path: tmpDir }))
-          .on('close', resolve)
-          .on('error', reject);
-      });
+      const directory = await unzipper.Open.buffer(backupBuffer);
+      const extractionRoot = path.resolve(tmpDir);
+      let extractedBytes = 0;
+      if (directory.files.length > 1000) throw new Error('El backup contiene demasiados archivos');
+      for (const entry of directory.files) {
+        const relativeName = entry.path.replaceAll('\\\\', '/');
+        const destination = path.resolve(extractionRoot, relativeName);
+        if (destination !== extractionRoot && !destination.startsWith(`${extractionRoot}${path.sep}`)) {
+          throw new Error('El backup contiene una ruta inválida');
+        }
+        if (entry.type === 'SymbolicLink' || entry.type === 'File' && entry.externalFileAttributes?.type === 'symlink') {
+          throw new Error('El backup contiene un enlace simbólico no permitido');
+        }
+        if (entry.type === 'Directory') {
+          fs.mkdirSync(destination, { recursive: true });
+          continue;
+        }
+        extractedBytes += Number(entry.uncompressedSize || 0);
+        if (extractedBytes > 500 * 1024 * 1024) throw new Error('El contenido descomprimido supera el límite permitido');
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        await new Promise((resolve, reject) => {
+          entry.stream()
+            .pipe(fs.createWriteStream(destination, { flags: 'wx' }))
+            .on('finish', resolve)
+            .on('error', reject);
+        });
+      }
       const dbExtraido = path.join(tmpDir, 'rifas.db');
       if (!fs.existsSync(dbExtraido)) throw new Error('El archivo .zip no contiene rifas.db');
       // Reemplazar la base de datos
@@ -2918,9 +2946,9 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
   // Volcar las imágenes/pósters sobre uploads/
       const uploadsExtraido = path.join(tmpDir, 'uploads');
       if (fs.existsSync(uploadsExtraido)) {
-        for (const f of fs.readdirSync(uploadsExtraido)) {
-          fs.copyFileSync(path.join(uploadsExtraido, f), path.join(uploadsDir, f));
-        }
+        // En Vercel uploadsDir apunta a /tmp; nunca copiar al bundle /var/task.
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.cpSync(uploadsExtraido, uploadsDir, { recursive: true, force: true });
       }
     } else {
       // El backup .db también se abre desde /tmp; /var/task es solo lectura.
@@ -2941,7 +2969,9 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
     } catch (_) {}
     res.status(500).json({ error: 'Error al restaurar: ' + err.message });
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    // La base restaurada usa este archivo temporal como origen de persistencia.
+    // No eliminarlo al finalizar la petición: hacerlo rompe el siguiente guardado.
+    // El sistema operativo limpia /tmp cuando recicla la instancia serverless.
   }
 });
 
