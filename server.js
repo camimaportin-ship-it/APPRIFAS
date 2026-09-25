@@ -79,9 +79,10 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Carpeta de imágenes subidas (producto y banner de empresa)
-const uploadsDir = path.join(__dirname, 'uploads');
-fs.mkdirSync(uploadsDir, { recursive: true });
-app.use('/uploads', express.static(uploadsDir));
+let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
+  if (process.env.VERCEL) uploadsDir = path.join(os.tmpdir(), 'rifas-uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  app.use('/uploads', (req, res, next) => express.static(uploadsDir)(req, res, next));
 
 // Health — Fase 2
 app.get('/health', (req, res) => res.json({ ok: true, version: '2.2.0', uptime: process.uptime(), db: fs.existsSync(dbPath) ? 'ok' : 'missing' }));
@@ -990,7 +991,7 @@ app.get('/api/changelog', (req, res) => {
           'Se regenera tras cada intento fallido',
           'Animación shake en respuesta incorrecta'
         ]},
-        { nombre: 'Backend ��� Video balotera', icono: '🎥', items: [
+        { nombre: 'Backend ����� Video balotera', icono: '🎥', items: [
           'BaloteraCanvas: métodos iniciarGrabacion() y detenerGrabacion()'
         ]},
         { nombre: 'Administración de usuarios', icono: '👥', items: [
@@ -2918,9 +2919,9 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
   // Volcar las imágenes/pósters sobre uploads/
       const uploadsExtraido = path.join(tmpDir, 'uploads');
       if (fs.existsSync(uploadsExtraido)) {
-        for (const f of fs.readdirSync(uploadsExtraido)) {
-          fs.copyFileSync(path.join(uploadsExtraido, f), path.join(uploadsDir, f));
-        }
+        // En Vercel uploadsDir apunta a /tmp; nunca copiar al bundle /var/task.
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.cpSync(uploadsExtraido, uploadsDir, { recursive: true, force: true });
       }
     } else {
       // El backup .db también se abre desde /tmp; /var/task es solo lectura.
