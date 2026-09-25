@@ -5737,7 +5737,11 @@ function handleRestoreFile(file) {
   const size = file.size < 1024 * 1024
     ? (file.size / 1024).toFixed(1) + ' KB'
     : (file.size / (1024 * 1024)).toFixed(1) + ' MB';
-  info.innerHTML = `📄 <strong>${file.name}</strong> (${size})`;
+  info.replaceChildren();
+  const icon = document.createTextNode('📄 ');
+  const name = document.createElement('strong');
+  name.textContent = file.name;
+  info.append(icon, name, document.createTextNode(` (${size})`));
   info.style.display = 'block';
   document.getElementById('restore-btn-confirm').disabled = false;
   document.getElementById('restore-btn-confirm').style.opacity = '1';
@@ -5811,9 +5815,15 @@ async function ejecutarRestore() {
     }
 
     bar.style.width = '100%';
-    text.textContent = '✅ Restaurado correctamente. Recargando...';
+    text.textContent = '✅ Restaurado correctamente. Actualizando la lista...';
 
-    setTimeout(() => { location.reload(); }, 1500);
+    // No recargar la página: una recarga crea una nueva instancia serverless y
+    // vuelve a abrir la SQLite original, ocultando la base recién restaurada.
+    setTimeout(async () => {
+      cerrarRestoreModal();
+      await router();
+      toast('Backup restaurado. Las rifas ya están disponibles.', 'success');
+    }, 700);
   } catch (err) {
     toast('Error: ' + err.message, 'error');
     bar.style.width = '100%';
