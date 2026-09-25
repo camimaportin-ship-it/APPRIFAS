@@ -8,6 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
@@ -2889,7 +2890,8 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
   if (!backupBuffer) return res.status(400).json({ error: 'No se envió archivo' });
 
   const esZip = /\.zip$/i.test(backupName) || backupMime.includes('zip');
-  const tmpDir = path.join(__dirname, '.restore-tmp-' + Date.now());
+  // /var/task es de solo lectura en Vercel; los temporales deben vivir en /tmp.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
 
   try {
     // Volcar y cerrar conexión actual
@@ -2898,7 +2900,6 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
 
     if (esZip) {
       // Extraer el .zip (rifas.db + uploads/) en un directorio temporal
-      fs.mkdirSync(tmpDir, { recursive: true });
       const tmpZip = path.join(tmpDir, 'backup.zip');
         fs.writeFileSync(tmpZip, backupBuffer);
       await new Promise((resolve, reject) => {
