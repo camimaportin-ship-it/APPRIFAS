@@ -5772,21 +5772,39 @@ async function ejecutarRestore() {
     let contentType = '';
 
     try {
-      // Importar el entrypoint de navegador explícito evita que esm.sh resuelva
+      const rutaBlob = `backups/${Date.now()}-${restoreFile.name}`;
+      const payloadCliente = JSON.stringify({
+        usuario: state.usuario?.usuario || '',
+        authToken: token
+      });
+
+      // Pedir el token nosotros mismos: si el servidor falla, el SDK de Blob
+      // oculta el error real detrás de "Failed to retrieve the client token".
+      const rToken = await fetch('/api/blob-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({
+          type: 'blob.generate-client-token',
+          payload: { pathname: rutaBlob, clientPayload: payloadCliente, multipart: false }
+        })
+      });
+      const datosToken = await rToken.json().catch(() => ({}));
+      if (!rToken.ok || !datosToken?.clientToken) {
+        throw new Error(datosToken?.error || `HTTP ${rToken.status}`);
+      }
+
+      // Importar el entrypoint de navegador explícitamente evita que esm.sh resuelva
       // el entrypoint de servidor, que no expone `upload`.
       const { upload } = await import('https://esm.sh/@vercel/blob@2.8.0/client?bundle&target=es2022');
       if (typeof upload !== 'function') {
         throw new Error('La integración de almacenamiento no está disponible.');
       }
-      const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
+      const blob = await upload(rutaBlob, restoreFile, {
         access: 'private',
         handleUploadUrl: '/api/blob-upload',
         headers: { Authorization: 'Bearer ' + token },
-        clientPayload: JSON.stringify({
-  usuario: state.usuario?.usuario || '',
-  authToken: token
-  }),
-  });
+        clientPayload: payloadCliente
+      });
       cuerpo = JSON.stringify({
         blobPathname: blob.pathname,
         fileName: restoreFile.name,
@@ -5796,7 +5814,7 @@ async function ejecutarRestore() {
     } catch (errBlob) {
       // Respaldo: subida directa cuando el archivo cabe en el límite de 4.5 MB
       // que Vercel aplica a los cuerpos de petición de las funciones.
-      if (restoreFile.size <= 3.5 * 1024 * 1024) {
+      if (restoreFile.size <= 4.3 * 1024 * 1024) {
         const fd = new FormData();
         fd.append('backup', restoreFile, restoreFile.name);
         cuerpo = fd;

@@ -3050,9 +3050,12 @@ app.get('/api/backup', async (req, res) => {
 // solo se envía su pathname pequeño a esta función.
 app.post('/api/blob-upload', async (req, res) => {
   try {
-    if (persist.faltaToken()) {
+    // handleUpload NO acepta OIDC: genera los tokens de cliente únicamente a
+    // partir de BLOB_READ_WRITE_TOKEN. Sin él, el SDK del navegador oculta el
+    // error real detrás de "Failed to retrieve the client token".
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return res.status(400).json({
-        error: 'Este despliegue no tiene Vercel Blob habilitado. Ve a tu proyecto en Vercel → Storage → Create Blob Store (agrega BLOB_READ_WRITE_TOKEN) y vuelve a intentarlo.'
+        error: 'Este despliegue no tiene Vercel Blob habilitado. Ve a tu proyecto en Vercel → Storage → Create Blob Store (agrega BLOB_READ_WRITE_TOKEN al entorno) y vuelve a intentarlo.'
       });
     }
     // handleUpload decodifica clientPayload y se lo entrega al callback. La
