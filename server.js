@@ -2216,12 +2216,18 @@ app.put('/api/participantes/:id', (req, res) => {
 app.delete('/api/participantes/:id', (req, res) => {
   const p = db.prepare('SELECT * FROM participantes WHERE id = ?').get(req.params.id);
   if (!p) return res.status(404).json({ error: 'Participante no encontrado' });
-  db.prepare('UPDATE numeros SET estado=\'libre\', participante_id=NULL, fecha_reservado=NULL WHERE participante_id=?')
-    .run(req.params.id);
-  db.prepare("UPDATE boletas_chance SET estado='libre', participante_id=NULL, fecha_reservado=NULL WHERE participante_id=?")
-    .run(req.params.id);
-  db.prepare('DELETE FROM participantes WHERE id = ?').run(req.params.id);
-  registrarHistorial(p.rifa_id, 'liberacion-manual', `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${p.nombre}) liberada manualmente`, req.usuario.usuario);
+  const rifaPart = db.prepare('SELECT * FROM rifas WHERE id = ?').get(p.rifa_id);
+  // El detalle del historial se arma ANTES de tocar los datos: si algo falla,
+  // la operación se revierte entera (borrado + historial) en la misma transacción.
+  const detalle = `Boleta ${numsBoleta(p).map(n => fmtNumero(rifaPart, n)).join(', ')} (${p.nombre}) liberada manualmente`;
+  db.transaction(() => {
+    db.prepare('UPDATE numeros SET estado=\'libre\', participante_id=NULL, fecha_reservado=NULL WHERE participante_id=?')
+      .run(req.params.id);
+    db.prepare("UPDATE boletas_chance SET estado='libre', participante_id=NULL, fecha_reservado=NULL WHERE participante_id=?")
+      .run(req.params.id);
+    db.prepare('DELETE FROM participantes WHERE id = ?').run(req.params.id);
+    registrarHistorial(p.rifa_id, 'liberacion-manual', detalle, req.usuario.usuario);
+  })();
   res.json({ ok: true });
 });
 
@@ -3254,6 +3260,17 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'frontend', 'index.html'));
+});
+
+// -------------------------- MANEJADOR DE ERRORES -----------------------------
+// Sin handler de errores Express responde 500 en HTML y el frontend solo ve
+// "Error de red". Aquí se loguea el fallo real (visible en los logs de
+// Railway/consola) y se responde JSON para que el toast muestre el motivo.
+app.use((err, req, res, next) => {
+  const estado = err?.status || err?.statusCode || 500;
+  console.error('[ERROR]', req.method, req.originalUrl, '-', err?.stack || err?.message || err);
+  if (res.headersSent) return next(err);
+  res.status(estado).json({ error: err?.message || 'Error interno del servidor' });
 });
 
 // -------------------------------- ARRANQUE ------------------------------------
