@@ -5771,6 +5771,26 @@ async function ejecutarRestore() {
     let cuerpo = null;
     let contentType = '';
 
+    // El flujo de Vercel Blob solo aplica a despliegues en Vercel. En Railway,
+    // Node local u otros entornos (persistencia 'local') el backup se sube
+    // directo a /api/restore, sin el límite de 4.3 MB de las funciones Vercel.
+    let modoPersist = null;
+    try {
+      const salud = await fetch('/api/health');
+      const datosSalud = await salud.json();
+      modoPersist = datosSalud?.persistencia || null;
+    } catch (_) {}
+
+    const subirDirecto = () => {
+      const fd = new FormData();
+      fd.append('backup', restoreFile, restoreFile.name);
+      cuerpo = fd;
+      contentType = '';
+    };
+
+    if (modoPersist === 'local') {
+      subirDirecto();
+    } else {
     try {
       const rutaBlob = `backups/${Date.now()}-${restoreFile.name}`;
       const payloadCliente = JSON.stringify({
@@ -5814,17 +5834,25 @@ async function ejecutarRestore() {
     } catch (errBlob) {
       // Respaldo: subida directa cuando el archivo cabe en el límite de 4.5 MB
       // que Vercel aplica a los cuerpos de petición de las funciones.
-      if (restoreFile.size <= 4.3 * 1024 * 1024) {
-        const fd = new FormData();
-        fd.append('backup', restoreFile, restoreFile.name);
-        cuerpo = fd;
-        contentType = '';
-      } else {
+      const limiteDirecto = 4.3 * 1024 * 1024;
+      if (restoreFile.size <= limiteDirecto) {
+        subirDirecto();
+      } else if (modoPersist === 'efimero') {
+        throw new Error(
+          'Este despliegue no tiene Vercel Blob habilitado y el backup pesa más de 4.3 MB ' +
+          '(límite de Vercel). Actívalo en Vercel → Storage → Create Blob Store.'
+        );
+      } else if (modoPersist === 'blob') {
         throw new Error(
           'No se pudo subir el backup a Vercel Blob (' + errBlob.message + '). ' +
           'Revisa que el proyecto tenga Blob habilitado en Vercel: Storage → Create Blob Store.'
         );
+      } else {
+        // Modo desconocido (no respondió /api/health): se intenta subir directo
+        // y, si el servidor lo rechaza, se muestra su mensaje real.
+        subirDirecto();
       }
+    }
     }
 
     bar.style.width = '60%';
