@@ -6,10 +6,32 @@
 // -----------------------------------------------------------------------------
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const initSqlJs = require('sql.js');
 
-const dbPath = path.join(__dirname, '..', 'data', 'rifas.db');
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+// En Vercel el bundle (/var/task) es de solo lectura y además `data/` no se
+// despliega (está en .gitignore): allí la base debe vivir en /tmp, que sí es
+// escribible (aunque efímero — la sincronización con Vercel Blob la conserva).
+// Fuera de Vercel se mantiene data/ como siempre.
+const EN_VERCEL = !!process.env.VERCEL;
+const dirDatos = EN_VERCEL
+  ? path.join(os.tmpdir(), 'rifas-data')
+  : path.join(__dirname, '..', 'data');
+try {
+  fs.mkdirSync(dirDatos, { recursive: true });
+} catch (e) {
+  console.error('[DB] No se pudo crear el directorio de datos:', e.message);
+}
+const dbPath = path.join(dirDatos, 'rifas.db');
+
+// Notificación de "hubo escrituras" para que el servidor pueda sincronizar
+// los cambios al almacenamiento persistente (Vercel Blob) antes de responder.
+let notificadorEscritura = null;
+function alEscribir(cb) { notificadorEscritura = cb; }
+function notificarEscritura() {
+  if (!notificadorEscritura) return;
+  try { notificadorEscritura(); } catch (e) { /* el hook no debe romper la escritura */ }
+}
 
 // ---- Wrapper que emula la API de better-sqlite3 sobre sql.js ---------------
 
@@ -68,6 +90,7 @@ class SqlJsWrapper {
 
   // Persistir a disco
   _save() {
+    notificarEscritura();
     try {
       const data = this._db.export();
       const buffer = Buffer.from(data);
@@ -75,6 +98,11 @@ class SqlJsWrapper {
     } catch (e) {
       console.error('[DB] Error guardando:', e.message);
     }
+  }
+
+  // Copia completa de la base en memoria (para respaldos y sincronización)
+  exportar() {
+    return Buffer.from(this._db.export());
   }
 
   close() {
@@ -481,4 +509,4 @@ CREATE INDEX IF NOT EXISTS idx_referidos_codigo ON referidos(codigo);
 `);
 }
 
-module.exports = { initDB, ensureSchema, dbPath };
+module.exports = { initDB, ensureSchema, dbPath, dirDatos, alEscribir };

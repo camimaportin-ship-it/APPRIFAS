@@ -5200,6 +5200,14 @@ async function initApp() {
     el.textContent = empresa.nombre_empresa || 'Colombia';
     el.title = empresa.nombre_empresa || 'Colombia';
   } catch (e) {}
+  // Avisar si el despliegue no tiene persistencia real (Vercel sin Blob):
+  // las rifas/planes se perderían al reciclar la instancia.
+  try {
+    const salud = await api('/health');
+    if (salud?.persistencia === 'efimero') {
+      toast('⚠️ Este despliegue NO tiene Vercel Blob: los cambios se pierden entre reinicios. Actívalo en Vercel → Storage → Create Blob Store.', 'error');
+    }
+  } catch (e) {}
   // Tooltip en nav-links: muestra texto completo al pasar el mouse
   document.querySelectorAll('.nav-link').forEach(link => {
     const span = link.querySelector('span');
@@ -5760,36 +5768,56 @@ async function ejecutarRestore() {
 
   try {
     const token = localStorage.getItem('rifassyc_token') || '';
-    // Importar el entrypoint de navegador explícito evita que esm.sh resuelva
-    // el entrypoint de servidor, que no expone `upload`.
-    const { upload } = await import('https://esm.sh/@vercel/blob@2.8.0/client?bundle&target=es2022');
-    if (typeof upload !== 'function') {
-      throw new Error('La integración de almacenamiento no está disponible. Recarga la página e inténtalo de nuevo.');
-    }
-    const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
-      access: 'private',
-      handleUploadUrl: '/api/blob-upload',
-      headers: { Authorization: 'Bearer ' + token },
-      clientPayload: JSON.stringify({
+    let cuerpo = null;
+    let contentType = '';
+
+    try {
+      // Importar el entrypoint de navegador explícito evita que esm.sh resuelva
+      // el entrypoint de servidor, que no expone `upload`.
+      const { upload } = await import('https://esm.sh/@vercel/blob@2.8.0/client?bundle&target=es2022');
+      if (typeof upload !== 'function') {
+        throw new Error('La integración de almacenamiento no está disponible.');
+      }
+      const blob = await upload(`backups/${Date.now()}-${restoreFile.name}`, restoreFile, {
+        access: 'private',
+        handleUploadUrl: '/api/blob-upload',
+        headers: { Authorization: 'Bearer ' + token },
+        clientPayload: JSON.stringify({
   usuario: state.usuario?.usuario || '',
   authToken: token
   }),
   });
+      cuerpo = JSON.stringify({
+        blobPathname: blob.pathname,
+        fileName: restoreFile.name,
+        fileType: restoreFile.type
+      });
+      contentType = 'application/json';
+    } catch (errBlob) {
+      // Respaldo: subida directa cuando el archivo cabe en el límite de 4.5 MB
+      // que Vercel aplica a los cuerpos de petición de las funciones.
+      if (restoreFile.size <= 3.5 * 1024 * 1024) {
+        const fd = new FormData();
+        fd.append('backup', restoreFile, restoreFile.name);
+        cuerpo = fd;
+        contentType = '';
+      } else {
+        throw new Error(
+          'No se pudo subir el backup a Vercel Blob (' + errBlob.message + '). ' +
+          'Revisa que el proyecto tenga Blob habilitado en Vercel: Storage → Create Blob Store.'
+        );
+      }
+    }
 
     bar.style.width = '60%';
     text.textContent = 'Reemplazando base de datos...';
 
+    const headers = { Authorization: 'Bearer ' + token };
+    if (contentType) headers['Content-Type'] = contentType;
     const res = await fetch('/api/restore', {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        blobPathname: blob.pathname,
-        fileName: restoreFile.name,
-        fileType: restoreFile.type
-      })
+      headers,
+      body: cuerpo
     });
 
     // Vercel puede devolver texto plano (por ejemplo, al superar el límite de
@@ -5812,6 +5840,10 @@ async function ejecutarRestore() {
 
     bar.style.width = '100%';
     text.textContent = '✅ Restaurado correctamente. Recargando...';
+    if (data?.aviso) {
+      toast('⚠️ ' + data.aviso, 'error');
+      text.textContent = '✅ Restaurado. ⚠️ ' + data.aviso;
+    }
 
     setTimeout(() => { location.reload(); }, 1500);
   } catch (err) {

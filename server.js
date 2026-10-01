@@ -15,7 +15,8 @@ const QRCode = require('qrcode');
 const XLSX = require('xlsx');
 const webPush = require('web-push');
 
-const { initDB, ensureSchema, dbPath } = require('./backend/db');
+const { initDB, ensureSchema, dbPath, alEscribir } = require('./backend/db');
+const persist = require('./backend/persistencia');
 const whatsapp = require('./backend/whatsapp');
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const bcrypt = require('bcryptjs');
@@ -29,9 +30,49 @@ const rateLimit = require('express-rate-limit');
 const env = require('./src/config/env');
 
 let db;
+// true cuando hubo escrituras locales que aún no se han subido a Blob
+let dbSucio = false;
+let sincronizacionEnCurso = null;
+let ultimaRevisionRemota = 0;
+const REVISION_REMOTA_MS = 5000;
+
+// Arranque de la base: en Vercel, traer desde Blob la versión más reciente
+// (o sembrar Blob si es la primera vez) ANTES de abrir sql.js.
+async function arrancarBase() {
+  alEscribir(() => { dbSucio = true; });
+  if (persist.habilitado()) {
+    try {
+      const metadatos = await persist.obtenerMetadatosDb();
+      let usarRemota = false;
+      if (metadatos) {
+        if (!fs.existsSync(dbPath)) {
+          usarRemota = true;
+        } else {
+          const mtimeLocal = fs.statSync(dbPath).mtimeMs;
+          usarRemota = new Date(metadatos.uploadedAt).getTime() > mtimeLocal + 1500;
+          if (!usarRemota) persist.marcarEtag(metadatos.etag);
+        }
+        if (usarRemota) {
+          const remota = await persist.descargarDb();
+          if (remota && remota.length) {
+            fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+            fs.writeFileSync(dbPath, remota);
+            console.log('[PERSIST] Base cargada desde Vercel Blob (' + remota.length + ' bytes)');
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[PERSIST] No se pudo cargar la base desde Blob:', e.message);
+    }
+  } else if (persist.faltaToken()) {
+    console.warn('[PERSIST] ⚠️ Sin BLOB_READ_WRITE_TOKEN: en Vercel los datos NO sobreviven entre reinicios/instancias.');
+    console.warn('[PERSIST]    Habilita Storage → Blob en el proyecto de Vercel para que rifas y restores persistan.');
+  }
+  db = await initDB();
+}
 
 async function startApp() {
-db = await initDB();
+await arrancarBase();
 ensureSchema(db);
 
 // ----------------------- PUSH NOTIFICATIONS -----------------------------------
@@ -82,11 +123,28 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
   if (process.env.VERCEL) uploadsDir = path.join(os.tmpdir(), 'rifas-uploads');
   fs.mkdirSync(uploadsDir, { recursive: true });
-  app.use('/uploads', (req, res, next) => express.static(uploadsDir)(req, res, next));
+  // En Vercel el espejo local de /tmp puede no tener la imagen: se baja de Blob
+  // bajo demanda y se cachea. Fuera de Vercel funciona igual que siempre.
+  app.use('/uploads', (req, res, next) => {
+    let rel;
+    try { rel = decodeURIComponent(req.path).replace(/^\/+/, ''); } catch (e) { return next(); }
+    const abs = path.resolve(uploadsDir, rel);
+    if (!abs.startsWith(path.resolve(uploadsDir) + path.sep)) return next();
+    if (fs.existsSync(abs)) return express.static(uploadsDir)(req, res, next);
+    if (!persist.habilitado()) return next();
+    persist.bajarUpload(rel)
+      .then((buf) => {
+        if (!buf) return next();
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, buf);
+        express.static(uploadsDir)(req, res, next);
+      })
+      .catch(() => next());
+  });
 
 // Health — Fase 2
 app.get('/health', (req, res) => res.json({ ok: true, version: '2.2.0', uptime: process.uptime(), db: fs.existsSync(dbPath) ? 'ok' : 'missing' }));
-app.get('/api/health', (req, res) => res.json({ ok: true, version: '2.2.0' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: '2.2.0', persistencia: persist.modo(), sincronizado: !persist.habilitado() || !dbSucio }));
 
 // SEO — Fase 2.3
 app.get('/robots.txt', (req, res) => res.sendFile(path.join(__dirname, 'frontend', 'robots.txt')));
@@ -310,6 +368,139 @@ function requireAuth(req, res, next) {
 }
 app.use(requireAuth);
 
+// ================== SINCRONIZACIÓN CON VERCEL BLOB ============================
+// En Vercel cada instancia/cold start arranca desde cero; sin esta capa las
+// rifas nuevas y los restores "no se guardan". Reglas:
+//  - Toda escritura se sube a Blob ANTES de responder (res.json lo espera).
+//  - Antes de atender se verifica el ETag remoto: si otra instancia escribió
+//    algo más reciente, se recarga la base local.
+//  - Las imágenes subidas se espejan a Blob y se bajan bajo demanda.
+const uploadsPendientes = new Set();
+let timerEspejoUploads = null;
+
+async function sincronizarUploads() {
+  if (!persist.habilitado() || uploadsPendientes.size === 0) return;
+  const pendientes = [...uploadsPendientes];
+  uploadsPendientes.clear();
+  for (const abs of pendientes) {
+    try {
+      if (fs.existsSync(abs)) await persist.subirUpload(abs, path.relative(uploadsDir, abs));
+    } catch (e) {
+      console.error('[PERSIST] Error espejando upload:', e.message);
+      uploadsPendientes.add(abs);
+    }
+  }
+}
+
+function programarEspejoUploads() {
+  if (!persist.habilitado()) { uploadsPendientes.clear(); return; }
+  if (uploadsPendientes.size === 0 || timerEspejoUploads) return;
+  timerEspejoUploads = setTimeout(() => {
+    timerEspejoUploads = null;
+    sincronizarUploads().catch((e) => console.error('[PERSIST] Espejo de uploads:', e.message));
+  }, 3000);
+}
+
+async function aplicarRemota(buf) {
+  try {
+    // El snapshot anterior deja de escribir sobre el archivo activo para que
+    // peticiones en vuelo no sobrescriban la base recién cargada.
+    if (db && typeof db._path === 'string') db._path = path.join(path.dirname(dbPath), 'db-reemplazada.db');
+  } catch (e) { /* ignorar */ }
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, buf);
+  db = await initDB(dbPath, dbPath);
+  ensureSchema(db);
+  console.log('[PERSIST] Base recargada desde Vercel Blob');
+}
+
+async function recargarRemota() {
+  const remota = await persist.descargarDb();
+  if (!remota || !remota.length) return false;
+  await aplicarRemota(remota);
+  return true;
+}
+
+async function sincronizarDb({ forzar = false } = {}) {
+  if (!persist.habilitado()) return { ok: true, local: true };
+  if (sincronizacionEnCurso) {
+    await sincronizacionEnCurso;
+    if (sincronizacionEnCurso) return sincronizarDb({ forzar });
+    if (!dbSucio && !forzar) return { ok: true };
+  }
+  if (!dbSucio && !forzar) return { ok: true };
+  sincronizacionEnCurso = (async () => {
+    try {
+      const buffer = db.exportar();   // mismo tick que limpia dbSucio: sin carreras
+      dbSucio = false;
+      const r = await persist.subirDb(buffer, { ifMatch: !forzar });
+      if (r.conflicto) {
+        console.warn('[PERSIST] Escritura concurrente (otra instancia). Recargando base…');
+        try { await recargarRemota(); } catch (e) { console.error('[PERSIST] Recarga:', e.message); }
+        return { ok: false, conflicto: true };
+      }
+      console.log('[PERSIST] Base sincronizada con Vercel Blob (' + buffer.length + ' bytes)');
+      return { ok: true };
+    } catch (e) {
+      dbSucio = true;
+      console.error('[PERSIST] Error sincronizando la base:', e.message);
+      return { ok: false, error: e.message };
+    } finally {
+      sincronizacionEnCurso = null;
+    }
+  })();
+  return sincronizacionEnCurso;
+}
+
+// 1) Antes de atender: base fresca + cambios locales ya subidos
+app.use(async (req, res, next) => {
+  if (!persist.habilitado() || !req.path.startsWith('/api/')) return next();
+  try {
+    if (dbSucio) {
+      // En conflicto, sincronizarDb ya recarga la base remota
+      await sincronizarDb();
+    }
+    const ahora = Date.now();
+    if (ahora - ultimaRevisionRemota > REVISION_REMOTA_MS) {
+      ultimaRevisionRemota = ahora;
+      const metadatos = await persist.obtenerMetadatosDb();
+      if (metadatos && metadatos.etag && metadatos.etag !== persist.obtenerEtagConocido()) {
+        await recargarRemota();
+      } else if (metadatos && !persist.obtenerEtagConocido()) {
+        const mtime = fs.existsSync(dbPath) ? fs.statSync(dbPath).mtimeMs : 0;
+        if (new Date(metadatos.uploadedAt).getTime() > mtime + 1500) await recargarRemota();
+        else persist.marcarEtag(metadatos.etag);
+      }
+      await sincronizarUploads();
+    }
+  } catch (e) {
+    console.error('[PERSIST] Error verificando frescura:', e.message);
+  }
+  next();
+});
+
+// 2) Después de responder: garantizar que los cambios salgan antes de la respuesta
+app.use((req, res, next) => {
+  const jsonOriginal = res.json.bind(res);
+  res.json = (cuerpo) => {
+    if (!dbSucio || !persist.habilitado() || res.headersSent) return jsonOriginal(cuerpo);
+    return sincronizarDb()
+      .then((r) => {
+        if (r && r.conflicto) {
+          res.statusCode = 409;
+          return jsonOriginal({ error: 'Los datos cambiaron en el servidor por otra operación. Recarga la página e inténtalo de nuevo.' });
+        }
+        return jsonOriginal(cuerpo);
+      })
+      .catch(() => jsonOriginal(cuerpo));
+  };
+  res.on('finish', () => {
+    if (dbSucio && persist.habilitado()) sincronizarDb().catch(() => {});
+    programarEspejoUploads();
+  });
+  next();
+});
+
 // ----------------------- RBAC (control de acceso por rol) --------------------
 // Jerarquía: super_admin > admin > vendedor
 function requireRole(...rolesPermitidos) {
@@ -487,14 +678,22 @@ function optimizeInBackground(file) {
   const p = file.path;
   // fire-and-forget, no bloquea la respuesta
   sharp(p).resize({ width: 1200, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer()
-    .then(buf => { try { fs.writeFileSync(p, buf); } catch(e){} })
-    .catch(()=>{});
+    .then(buf => {
+      try {
+        fs.writeFileSync(p, buf);
+        // La versión optimizada es la que debe espejarse a Blob
+        uploadsPendientes.add(p);
+        programarEspejoUploads();
+      } catch (e) {}
+    })
+    .catch(() => {});
 }
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || '.jpg';
     const nombre = `${file.fieldname}-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    uploadsPendientes.add(path.join(uploadsDir, nombre));
     cb(null, nombre);
   }
 });
@@ -2804,15 +3003,38 @@ app.get('/api/public/rifa/:id', (req, res) => {
 
 app.get('/api/backup', async (req, res) => {
   try {
-    // Volcar lo último a disco antes de empaquetar
-    if (typeof db._save === 'function') db._save();
+    // Volcar lo último a Blob (si corresponde) y a disco antes de empaquetar
+    if (persist.habilitado() && dbSucio) {
+      const r = await sincronizarDb();
+      if (r && r.conflicto) return res.status(409).json({ error: 'Los datos cambiaron en el servidor. Recarga e inténtalo de nuevo.' });
+    }
+    const bufferDb = db.exportar();
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    fs.writeFileSync(dbPath, bufferDb); // en Vercel dbPath vive en /tmp (escribible)
     const fecha = new Date().toISOString().slice(0, 10);
     const archive = archiver('zip', { zlib: { level: 9 } });
     res.attachment(`backup-rifas-${fecha}.zip`);
     archive.on('warning', (err) => { if (err.code !== 'ENOENT') console.warn('[BACKUP]', err); });
     archive.on('error', (err) => console.error('[BACKUP]', err));
     archive.pipe(res);
-    archive.append(fs.createReadStream(dbPath), { name: 'rifas.db' });
+    archive.append(bufferDb, { name: 'rifas.db' });
+    // En Vercel, completar con las imágenes que solo viven en Blob
+    if (persist.habilitado()) {
+      try {
+        const remotos = await persist.listarUploads(400);
+        let bytes = 0;
+        for (const it of remotos) {
+          bytes += Number(it.size || 0);
+          if (bytes > 80 * 1024 * 1024) { console.warn('[BACKUP] Límite de imágenes alcanzado'); break; }
+          const abs = path.resolve(uploadsDir, it.rel);
+          if (fs.existsSync(abs) || !abs.startsWith(path.resolve(uploadsDir) + path.sep)) continue;
+          const buf = await persist.bajarUpload(it.rel);
+          if (!buf) continue;
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, buf);
+        }
+      } catch (e) { console.warn('[BACKUP] No se pudieron bajar las imágenes desde Blob:', e.message); }
+    }
     if (fs.existsSync(uploadsDir)) archive.directory(uploadsDir, 'uploads');
     await archive.finalize();
   } catch (err) {
@@ -2828,6 +3050,11 @@ app.get('/api/backup', async (req, res) => {
 // solo se envía su pathname pequeño a esta función.
 app.post('/api/blob-upload', async (req, res) => {
   try {
+    if (persist.faltaToken()) {
+      return res.status(400).json({
+        error: 'Este despliegue no tiene Vercel Blob habilitado. Ve a tu proyecto en Vercel → Storage → Create Blob Store (agrega BLOB_READ_WRITE_TOKEN) y vuelve a intentarlo.'
+      });
+    }
     // handleUpload decodifica clientPayload y se lo entrega al callback. La
     // autorización debe hacerse allí; validar req.body antes puede fallar porque
     // el formato exacto del body lo controla @vercel/blob/client.
@@ -2869,6 +3096,14 @@ app.post('/api/blob-upload', async (req, res) => {
 });
 
 app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
+  // En Vercel sin Blob la restauración solo viviría en la instancia actual
+  // (y se perdería al reciclarla): mejor fallar con instrucciones claras.
+  if (persist.faltaToken()) {
+    return res.status(400).json({
+      error: 'Este despliegue no tiene Vercel Blob habilitado: la restauración se perdería al instante. Ve a tu proyecto en Vercel → Storage → Create Blob Store (esto agrega BLOB_READ_WRITE_TOKEN) y vuelve a intentarlo.'
+    });
+  }
+
   let backupBuffer = req.file?.buffer;
   let backupName = req.file?.originalname || '';
   let backupMime = req.file?.mimetype || '';
@@ -2897,8 +3132,8 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
   if (!backupBuffer) return res.status(400).json({ error: 'No se envió archivo' });
 
   const esZip = /\.zip$/i.test(backupName) || backupMime.includes('zip');
-  // /var/task es de solo lectura en Vercel; los temporales deben vivir en /tmp.
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
+  // El proceso de extracción necesita un directorio temporal escribible.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
 
   try {
     // Volcar y cerrar conexión actual
@@ -2938,27 +3173,65 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
       }
       const dbExtraido = path.join(tmpDir, 'rifas.db');
       if (!fs.existsSync(dbExtraido)) throw new Error('El archivo .zip no contiene rifas.db');
-      // Reemplazar la base de datos
-  // En Vercel /var/task es de solo lectura. Reabrir la base restaurada
-  // directamente desde el archivo temporal evita copiarla al bundle.
-  db = await initDB(dbExtraido, dbExtraido);
-  ensureSchema(db);
-  // Volcar las imágenes/pósters sobre uploads/
+      // Reemplazar la base: copiarla a la ruta activa (dbPath, escribible en
+      // Vercel porque vive en /tmp) y reabrirla AHÍ, para que los siguientes
+      // guardados no apunten al temporal del zip.
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      fs.copyFileSync(dbExtraido, dbPath);
+      db = await initDB(dbPath, dbPath);
+      ensureSchema(db);
+      // Volcar las imágenes/pósters sobre uploads/
       const uploadsExtraido = path.join(tmpDir, 'uploads');
       if (fs.existsSync(uploadsExtraido)) {
-        // En Vercel uploadsDir apunta a /tmp; nunca copiar al bundle /var/task.
         fs.mkdirSync(uploadsDir, { recursive: true });
         fs.cpSync(uploadsExtraido, uploadsDir, { recursive: true, force: true });
       }
     } else {
-      // El backup .db también se abre desde /tmp; /var/task es solo lectura.
-      const dbRestaurada = path.join(tmpDir, 'rifas.db');
-      fs.writeFileSync(dbRestaurada, backupBuffer);
-      db = await initDB(dbRestaurada, dbRestaurada);
+      // Mismo criterio: persistir en la ruta activa, no en el temporal.
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      fs.writeFileSync(dbPath, backupBuffer);
+      db = await initDB(dbPath, dbPath);
       ensureSchema(db);
     }
 
     console.log('[RESTORE] Base de datos restaurada correctamente');
+
+    // Persistir la restauración en Vercel Blob para que TODAS las instancias
+    // (y los próximos cold starts) la vean. Es sobrescritura intencional: sin
+    // condición ifMatch.
+    if (persist.habilitado()) {
+      dbSucio = true;
+      const r = await sincronizarDb({ forzar: true });
+      if (!r.ok) {
+        console.error('[RESTORE] No se pudo subir la base restaurada a Blob:', r.error || 'conflicto');
+        return res.status(500).json({ error: 'La base se restauró localmente pero falló la subida a Vercel Blob. Reintenta.' });
+      }
+      try {
+        const raizUploads = path.join(tmpDir, 'uploads');
+        if (fs.existsSync(raizUploads)) {
+          const archivos = [];
+          const recorrer = (dir, rel) => {
+            for (const nom of fs.readdirSync(dir)) {
+              const abs = path.join(dir, nom);
+              const rel2 = rel ? `${rel}/${nom}` : nom;
+              if (fs.statSync(abs).isDirectory()) recorrer(abs, rel2);
+              else archivos.push({ abs, rel: rel2 });
+            }
+          };
+          recorrer(raizUploads, '');
+          let bytes = 0;
+          for (const f of archivos.slice(0, 400)) {
+            bytes += fs.statSync(f.abs).size;
+            if (bytes > 100 * 1024 * 1024) break;
+            await persist.subirUpload(f.abs, f.rel);
+          }
+          console.log(`[RESTORE] ${Math.min(archivos.length, 400)} imagen(es) espejadas en Vercel Blob`);
+        }
+      } catch (e) {
+        console.warn('[RESTORE] No se pudieron espejar las imágenes:', e.message);
+      }
+    }
+
     res.json({ ok: true, mensaje: 'Base de datos restaurada correctamente' });
   } catch (err) {
     console.error('[RESTORE] Error:', err.message);
@@ -2969,9 +3242,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
     } catch (_) {}
     res.status(500).json({ error: 'Error al restaurar: ' + err.message });
   } finally {
-    // La base restaurada usa este archivo temporal como origen de persistencia.
-    // No eliminarlo al finalizar la petición: hacerlo rompe el siguiente guardado.
-    // El sistema operativo limpia /tmp cuando recicla la instancia serverless.
+    // La base restaurada persiste en dbPath (en Vercel: /tmp/rifas-data) y en
+    // Vercel Blob; el directorio temporal del zip lo limpia el SO.
   }
 });
 
@@ -3030,6 +3302,12 @@ function purgarPapeleraVencida() {
   } catch (e) { console.error('[Papelera] Error en purge automático:', e.message); }
 }
 setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
+
+  // Primera sincronización (siembra Blob en el primer despliegue y aplica
+  // migraciones de esquema antes de atender la primera petición).
+  if (persist.habilitado()) {
+    try { await sincronizarDb(); } catch (e) { console.error('[PERSIST] Sincronización inicial:', e.message); }
+  }
 
   return app;
 } // fin startApp()
