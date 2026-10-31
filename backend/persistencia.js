@@ -44,6 +44,7 @@ function modo() {
 }
 
 function dirDatos() {
+  if (process.env.DATA_DIR) return process.env.DATA_DIR;
   return EN_VERCEL ? path.join(os.tmpdir(), 'rifas-data') : path.join(__dirname, '..', 'data');
 }
 

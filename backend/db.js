@@ -14,9 +14,9 @@ const initSqlJs = require('sql.js');
 // escribible (aunque efímero — la sincronización con Vercel Blob la conserva).
 // Fuera de Vercel se mantiene data/ como siempre.
 const EN_VERCEL = !!process.env.VERCEL;
-const dirDatos = EN_VERCEL
+const dirDatos = process.env.DATA_DIR || (EN_VERCEL
   ? path.join(os.tmpdir(), 'rifas-data')
-  : path.join(__dirname, '..', 'data');
+  : path.join(__dirname, '..', 'data'));
 try {
   fs.mkdirSync(dirDatos, { recursive: true });
 } catch (e) {

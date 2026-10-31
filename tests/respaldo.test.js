@@ -91,3 +91,4 @@ describe('sistema de respaldo verificable', () => {
     expect(restantes.length).toBe(3);
   });
 });
+
