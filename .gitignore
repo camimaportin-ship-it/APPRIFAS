@@ -10,6 +10,10 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.bak-*
+data/*.corrupt-*
+
+# Respaldos locales generados
+backups/
 
 # Logs / temporales
 *.log

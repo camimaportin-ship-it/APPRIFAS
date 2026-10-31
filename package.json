@@ -17,6 +17,9 @@
     "format": "prettier --write \"**/*.{js,json,md}\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:backup": "node scripts/backup-db.js",
+    "db:backup:list": "node scripts/backup-db.js --list",
+    "db:backup:verify": "node scripts/backup-db.js --verify",
     "postinstall": "node -e \"console.log('[Rifas SYC] Dependencias instaladas. Ejecuta: npm start')\""
   },
   "dependencies": {

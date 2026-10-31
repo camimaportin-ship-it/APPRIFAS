@@ -43,9 +43,27 @@ WHATSAPP_WEBHOOK_TOKEN=
 
 # Solo Vercel: sin BLOB_READ_WRITE_TOKEN los datos no persisten entre reinicios.
 BLOB_READ_WRITE_TOKEN=
+
+# Opcional: programar respaldos periódicos automáticos (horas)
+BACKUP_CADA_HORAS=12
+BACKUP_DIR=
+BACKUP_DIR_EXTERNO=
 ```
 
-## 4. Si vuelve a aparecer el error
+## 4. Estrategia y comandos de respaldo
+
+El sistema cuenta con 3 niveles de respaldo:
+
+1. **En caliente (tiempo real)**: `rifas.db.bak-1..3` se rotan con cada escritura (máx. 1/min) y se protegen mediante escritura atómica (`.tmp` + `fsync` + `rename`).
+2. **Programado / manual por CLI**:
+   - `npm run db:backup`: genera un snapshot verificado con SHA-256 en `./backups`.
+   - `npm run db:backup -- --externo "D:\Respaldos"`: guarda una copia gemela en otra unidad o nube.
+   - `npm run db:backup:list`: lista los respaldos existentes y sus fechas.
+   - `npm run db:backup:verify <archivo>`: comprueba integridad SHA-256 y SQLite.
+   - `BACKUP_CADA_HORAS=12`: activa el temporizador periódico dentro de `server.js`.
+3. **Descargable vía Web**: Desde el panel de administración (`GET /api/backup`), descarga un `.zip` con la base y todas las imágenes de `uploads/`.
+
+## 5. Si vuelve a aparecer un crasheo o base corrupta
 
 1. Consultar `GET /health`. Si responde `ok: true` con `dbRecuperada: true`, la app
    ya se curó sola: se perdió como máximo lo escrito en el último minuto.
@@ -65,20 +83,20 @@ BLOB_READ_WRITE_TOKEN=
 En Vercel el sistema de archivos es efímero: el `rifas.db` de `/tmp` desaparece en
 cada arranque. Allí la fuente de verdad es Vercel Blob (`BLOB_READ_WRITE_TOKEN`).
 
-## 5. Verificación
+## 6. Verificación
 
 ```bash
 npm test                                                   # suite completa
 node -e "fetch('http://localhost:3000/health').then(r=>r.json()).then(console.log)"
 ```
 
-La suite (`tests/db-integridad.test.js`, `tests/seguridad.test.js`) cubre:
+La suite (`tests/db-integridad.test.js`, `tests/seguridad.test.js`, `tests/respaldo.test.js`) cubre:
 escritura atómica sin temporales huérfanos, no reescritura cuando la sentencia no
 cambia nada, recuperación desde `.bak-1` y `.bak-2`, base corrupta sin respaldos,
-validación de buffers, lista blanca de imágenes, saneamiento de nombres y firma de
-Wompi.
+validación de buffers, integridad SHA-256 de respaldos, lista blanca de imágenes,
+saneamiento de nombres y firma de Wompi.
 
-## 6. Checklist antes de desplegar
+## 7. Checklist antes de desplegar
 
 - [ ] `AUTH_SECRET` definido (32+ caracteres) en el panel del proveedor.
 - [ ] Contraseñas semilla cambiadas (`ADMIN_SEED_PASS`, `ADMIN_SEED_PASS_2`).

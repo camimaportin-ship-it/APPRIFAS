@@ -16,6 +16,7 @@ const XLSX = require('xlsx');
 const webPush = require('web-push');
 
 const { initDB, ensureSchema, dbPath, alEscribir, validarBufferDb, estadoRecuperacion } = require('./backend/db');
+const { crearRespaldo } = require('./backend/respaldo');
 const persist = require('./backend/persistencia');
 const seguridad = require('./backend/seguridad');
 const whatsapp = require('./backend/whatsapp');
@@ -3445,6 +3446,25 @@ function purgarPapeleraVencida() {
   } catch (e) { console.error('[Papelera] Error en purge automático:', e.message); }
 }
 setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
+
+  // Respaldo automático periódico (configurable por variable de entorno BACKUP_CADA_HORAS, ej: 6 ó 12)
+  const horasBackup = Number(process.env.BACKUP_CADA_HORAS || 0);
+  if (horasBackup > 0 && !process.env.VERCEL) {
+    const dirBackups = process.env.BACKUP_DIR || path.join(__dirname, 'backups');
+    const dirExterno = process.env.BACKUP_DIR_EXTERNO || null;
+    const intervaloMs = horasBackup * 60 * 60 * 1000;
+    setInterval(async () => {
+      try {
+        if (!db) return;
+        const buffer = db.exportar();
+        const res = await crearRespaldo({ buffer, dir: dirBackups, externo: dirExterno });
+        console.log(`[BACKUP AUTO] ✅ Respaldo periódico creado: ${res.nombre} (${Math.round(res.bytes / 1024)} KB)`);
+      } catch (e) {
+        console.error('[BACKUP AUTO] ❌ Error en respaldo periódico:', e.message);
+      }
+    }, intervaloMs);
+    console.log(`[BACKUP AUTO] Programado cada ${horasBackup} hora(s) en ${dirBackups}`);
+  }
 
   // Primera sincronización (siembra Blob en el primer despliegue y aplica
   // migraciones de esquema antes de atender la primera petición).
