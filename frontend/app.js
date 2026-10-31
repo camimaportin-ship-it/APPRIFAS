@@ -341,9 +341,10 @@ function mostrarNumerosBoleta(rifa, p) {
   return arr.map(n => String(n).padStart(pad, '0')).join(', ');
 }
 
-function abrirModal(html) {
+function abrirModal(html, opciones = {}) {
   const root = document.getElementById('modal-root');
-  root.innerHTML = `<div class="modal-backdrop" id="modal-backdrop"><div class="modal">${html}</div></div>`;
+  const estilo = opciones.maxWidth ? `style="max-width:${opciones.maxWidth}; width:96%;"` : '';
+  root.innerHTML = `<div class="modal-backdrop" id="modal-backdrop"><div class="modal" ${estilo}>${html}</div></div>`;
   document.getElementById('modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'modal-backdrop') cerrarModal();
   });
@@ -2568,38 +2569,541 @@ function modalRegistroChance(rifaId, preseleccion) {
   });
 }
 
-function modalRegistroMasivo(rifaId) {
-  const rifa = state.rifaActual || {};
-  const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
-  abrirModal(`
-    <div class="modal__header"><h3>Registro masivo</h3><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">✕</button></div>
-    <div class="modal__body">
-      <p class="text-sm text-ink-600 mb-3">Pega una línea por participante. <strong>Nombre es obligatorio</strong>; teléfono y cédula son opcionales.</p>
-      <p class="text-sm mb-2">Formatos válidos:</p>
-      <ul class="text-sm text-ink-600 mb-3" style="padding-left:18px;">
-        <li><code>Nombre, Teléfono</code> — ejemplo: <code>Juan Pérez, 3001234567</code></li>
-        <li><code>Nombre, Cédula, Teléfono</code> — ejemplo: <code>Juan Pérez, 1020304050, 3001234567</code></li>
-      </ul>
-      <p class="text-sm text-ink-600 mb-2">Se detectan duplicados y ${esCuatro ? `se asignan <strong>${nOport(rifa)} números al azar</strong> por persona` : 'se asigna el número automáticamente'}.</p>
-      <textarea class="input" id="texto-masivo" rows="8" placeholder="Juan Pérez, 3001234567
-María Gómez, 1020304050, 3007654321"></textarea>
-      <div class="modal__footer" style="padding:0; margin-top:14px;">
-        <button class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
-        <button class="btn btn-gold" onclick="enviarRegistroMasivo(${rifaId})">Registrar todos</button>
-      </div>
-    </div>`);
+// -----------------------------------------------------------------------------
+// REGISTRO MASIVO TIPO HOJA DE CÁLCULO (Spreadsheet interactiva)
+// Permite registrar múltiples personas y asignar varios números por persona
+// (soporta tanto cantidad al azar como números específicos elegidos)
+// -----------------------------------------------------------------------------
+
+function _masivoParseAsignacion(str, setLibres) {
+  const s = String(str || '').trim();
+  if (!s || s === '1') {
+    return { modo: 'azar', cantidad: 1, numeros: [], ocupados: [], valido: true, label: '🎲 1 boleta al azar' };
+  }
+  const matchCant = s.match(/^(?:x\s*|cant\s*:?\s*)?(\d+)(?:\s*(?:boletas?|nums?|números?))?$/i);
+  if (matchCant && Number(matchCant[1]) <= 100 && !s.startsWith('0') && s.length <= 3) {
+    const cant = Math.max(1, parseInt(matchCant[1], 10));
+    return { modo: 'azar', cantidad: cant, numeros: [], ocupados: [], valido: true, label: `🎲 ${cant} boletas al azar` };
+  }
+  const matchNums = s.match(/\b\d+\b/g);
+  if (matchNums && matchNums.length > 0) {
+    const nums = matchNums.map(Number);
+    const ocupados = [];
+    if (setLibres) {
+      for (const n of nums) {
+        if (!setLibres.has(n)) ocupados.push(n);
+      }
+    }
+    const valido = ocupados.length === 0;
+    const label = `🎯 ${nums.length} número(s): [${nums.join(', ')}]`;
+    return { modo: 'especifico', cantidad: nums.length, numeros: nums, ocupados, valido, label };
+  }
+  return { modo: 'azar', cantidad: 1, numeros: [], ocupados: [], valido: true, label: '🎲 1 boleta al azar' };
 }
 
-async function enviarRegistroMasivo(rifaId) {
-  const texto = document.getElementById('texto-masivo').value;
+async function modalRegistroMasivo(rifaId) {
+  abrirModal(`
+    <div class="modal__header"><h3>Cargando números de la rifa...</h3></div>
+    <div class="modal__body"><div class="empty-state"><div class="icon">⏳</div><p>Preparando hoja de registro masivo...</p></div></div>
+  `);
+
   try {
-    const r = await api('/rifas/' + rifaId + '/participantes/masivo', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto })
-    });
+    const rifa = state.rifaActual && state.rifaActual.id === rifaId ? state.rifaActual : await api('/rifas/' + rifaId);
+    const dataNumeros = await api('/rifas/' + rifaId + '/numeros');
+    const esCuatro = rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES';
+    const esChance = modoEsChance(rifa);
+
+    const libresArray = esCuatro
+      ? (dataNumeros.grupos || []).filter(g => g.estado === 'libre')
+      : esChance
+        ? (dataNumeros.boletas || []).filter(b => b.estado === 'libre')
+        : (Array.isArray(dataNumeros) ? dataNumeros : (dataNumeros.numeros || [])).filter(n => n.estado === 'libre');
+
+    const setLibres = new Set(
+      esCuatro
+        ? libresArray.flatMap(g => g.numeros || [])
+        : esChance
+          ? libresArray.map(b => b.numero)
+          : libresArray.map(n => Number(n.numero))
+    );
+
+    state._registroMasivo = {
+      rifaId,
+      rifa,
+      esCuatro,
+      chance: esChance,
+      setLibres,
+      totalLibres: libresArray.length,
+      mostrarPegar: false,
+      estadoPago: 'pendiente',
+      metodoPago: 'efectivo',
+      observacion: '',
+      filas: [
+        { id: 1, nombre: '', telefono: '', cedula: '', asignacion: '1' },
+        { id: 2, nombre: '', telefono: '', cedula: '', asignacion: '1' },
+        { id: 3, nombre: '', telefono: '', cedula: '', asignacion: '1' }
+      ]
+    };
+
+    _renderModalRegistroMasivo();
+  } catch (err) {
     cerrarModal();
-    toast(`✅ ${r.insertados.length} agregados · ${r.duplicados.length} duplicados · ${r.sinCupo.length} sin cupo`);
-    vistaDetalleRifa(rifaId, 'participantes');
-  } catch (err) { toast(err.message, 'error'); }
+    toast('Error cargando rifa: ' + err.message, 'error');
+  }
+}
+
+function _renderModalRegistroMasivo() {
+  const m = state._registroMasivo;
+  if (!m) return;
+
+  // Cálculos dinámicos
+  let totalBoletas = 0;
+  let hayErrores = false;
+  let filasValidas = 0;
+
+  m.filas.forEach(f => {
+    const parse = _masivoParseAsignacion(f.asignacion, m.setLibres);
+    f._parse = parse;
+    if (f.nombre && f.nombre.trim()) {
+      filasValidas++;
+      totalBoletas += parse.cantidad;
+      if (!parse.valido) hayErrores = true;
+    }
+  });
+
+  const cupoInsuficiente = totalBoletas > m.totalLibres;
+
+  const html = `
+    <div class="modal__header" style="padding:16px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <h3 style="margin:0; font-size:17px; font-weight:700;">📊 Registro Masivo de Participantes</h3>
+        <p style="margin:2px 0 0; font-size:12px; color:var(--ink-600);">
+          Rifa: <strong>${escapeHtml(m.rifa.nombre)}</strong> · ${m.totalLibres} boletas/números disponibles
+        </p>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="state._registroMasivo=null; cerrarModal();" style="font-size:16px;">✕</button>
+    </div>
+
+    <div class="modal__body" style="padding:16px 20px; max-height:calc(85vh - 130px); overflow-y:auto;">
+      <!-- Barra superior de acciones -->
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="_masivoAgregarFila()">
+            ➕ Agregar fila
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="_masivoTogglePegar()">
+            📋 ${m.mostrarPegar ? 'Ocultar importador' : 'Pegar desde Excel / Texto'}
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="_masivoLimpiarFilas()" style="color:#ef4444;">
+            🗑️ Vaciar
+          </button>
+        </div>
+
+        <!-- Opciones de pago del lote -->
+        <div style="display:flex; align-items:center; gap:8px; background:var(--line-soft); padding:4px 10px; border-radius:10px;">
+          <span style="font-size:12px; font-weight:600; color:var(--ink-700);">Estado de pago:</span>
+          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;">
+            <input type="radio" name="masivo-pago-opt" value="pendiente" ${m.estadoPago === 'pendiente' ? 'checked' : ''} onchange="_masivoCambiarPago('pendiente')">
+            ⏳ Pendiente
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;">
+            <input type="radio" name="masivo-pago-opt" value="pagado" ${m.estadoPago === 'pagado' ? 'checked' : ''} onchange="_masivoCambiarPago('pagado')">
+            ✅ Pagado
+          </label>
+          ${m.estadoPago === 'pagado' ? `
+            <select class="input" style="font-size:12px; padding:3px 8px; width:auto;" onchange="_masivoCambiarMetodo(this.value)">
+              <option value="efectivo" ${m.metodoPago === 'efectivo' ? 'selected' : ''}>💵 Efectivo</option>
+              <option value="nequi" ${m.metodoPago === 'nequi' ? 'selected' : ''}>🟣 Nequi</option>
+              <option value="daviplata" ${m.metodoPago === 'daviplata' ? 'selected' : ''}>🔴 Daviplata</option>
+              <option value="transferencia" ${m.metodoPago === 'transferencia' ? 'selected' : ''}>🏦 Transferencia</option>
+              <option value="otro" ${m.metodoPago === 'otro' ? 'selected' : ''}>💳 Otro</option>
+            </select>
+          ` : ''}
+        </div>
+      </div>
+
+      <!-- Panel desplegable de importación rápida desde Excel o portapapeles -->
+      ${m.mostrarPegar ? `
+        <div style="background:var(--line-soft); border:1px dashed var(--line); border-radius:12px; padding:12px; margin-bottom:14px;">
+          <p style="font-size:12px; font-weight:600; margin:0 0 6px;">📥 Pegar datos copiados de Excel o lista de texto:</p>
+          <p style="font-size:11px; color:var(--ink-600); margin:0 0 8px;">
+            Acepta celdas de Excel (tabulación) o texto separado por comas. Columnas admitidas: <code>Nombre</code>, <code>Teléfono</code>, <code>Cédula</code>, <code>Cantidad ó Números</code>.
+          </p>
+          <textarea id="masivo-input-pegar" class="input" rows="4" style="font-family:monospace; font-size:12px;" placeholder="Juan Pérez	3001234567	10203040	3
+María Gómez	3007654321		05, 12, 89
+Carlos Ruiz	3129876543	79123456	1"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="_masivoTogglePegar()">Cerrar</button>
+            <button type="button" class="btn btn-gold btn-sm" onclick="_masivoProcesarTextoPegado()">📥 Cargar filas a la tabla</button>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Tabla interactiva tipo hoja de cálculo -->
+      <div style="overflow-x:auto; border:1px solid var(--line); border-radius:12px;">
+        <table class="tbl" style="margin:0; width:100%; border-collapse:collapse;">
+          <thead style="background:var(--line-soft);">
+            <tr>
+              <th style="width:40px; text-align:center;">#</th>
+              <th style="min-width:180px;">Nombre Completo *</th>
+              <th style="min-width:130px;">Teléfono</th>
+              <th style="min-width:120px;">Cédula</th>
+              <th style="min-width:210px;">
+                Asignación de Números (Mixto)
+                <span title="Escribe una cantidad (ej: 3) para números al azar, o números exactos (ej: 05, 12, 89)" style="cursor:help; font-size:11px; color:var(--gold-600);">ℹ️</span>
+              </th>
+              <th style="width:50px; text-align:center;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${m.filas.map((f, i) => {
+              const parse = f._parse;
+              const tieneNombre = f.nombre && f.nombre.trim();
+              const badgeCls = !tieneNombre ? 'color:var(--ink-400);' : parse.valido ? 'color:#15803d; font-weight:600;' : 'color:#b91c1c; font-weight:700;';
+              return `
+                <tr id="masivo-fila-${i}" style="border-bottom:1px solid var(--line-soft);">
+                  <td style="text-align:center; font-size:12px; color:var(--ink-500); font-weight:600;">${i + 1}</td>
+                  <td style="padding:6px 8px;">
+                    <input class="input" value="${escapeHtml(f.nombre)}" placeholder="Ej: Juan Pérez"
+                      oninput="_masivoUpdateFila(${i}, 'nombre', this.value)"
+                      style="font-size:13px; padding:6px 8px; ${!tieneNombre && f._tocado ? 'border-color:#ef4444;' : ''}">
+                  </td>
+                  <td style="padding:6px 8px;">
+                    <input class="input" value="${escapeHtml(f.telefono)}" placeholder="3001234567" inputmode="tel"
+                      oninput="_masivoUpdateFila(${i}, 'telefono', this.value)"
+                      style="font-size:13px; padding:6px 8px;">
+                  </td>
+                  <td style="padding:6px 8px;">
+                    <input class="input" value="${escapeHtml(f.cedula)}" placeholder="Opcional" inputmode="numeric"
+                      oninput="_masivoUpdateFila(${i}, 'cedula', this.value)"
+                      style="font-size:13px; padding:6px 8px;">
+                  </td>
+                  <td style="padding:6px 8px;">
+                    <input class="input" value="${escapeHtml(f.asignacion)}" placeholder="Ej: 3 (azar) ó 05, 12, 89"
+                      oninput="_masivoUpdateFila(${i}, 'asignacion', this.value)"
+                      onkeydown="if(event.key==='Enter'){ event.preventDefault(); _masivoAgregarFila(); }"
+                      style="font-size:13px; padding:6px 8px; ${!parse.valido ? 'border-color:#ef4444; background:rgba(239,68,68,0.06);' : ''}">
+                    <div style="font-size:11px; margin-top:3px; ${badgeCls}">
+                      ${parse.valido ? parse.label : `❌ Número(s) ocupado(s): ${parse.ocupados.join(', ')}`}
+                    </div>
+                  </td>
+                  <td style="text-align:center; padding:6px;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="_masivoEliminarFila(${i})" title="Quitar fila" style="color:#ef4444; padding:4px 8px; font-weight:bold;">
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Resumen en vivo -->
+      <div style="margin-top:14px; padding:10px 14px; background:var(--line-soft); border-radius:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; gap:14px; font-size:13px; align-items:center; flex-wrap:wrap;">
+          <span>👥 Participantes válidos: <strong>${filasValidas}</strong></span>
+          <span>🎟️ Boletas a asignar: <strong>${totalBoletas}</strong></span>
+          <span>📦 Cupo disponible: <strong>${m.totalLibres}</strong></span>
+        </div>
+        <div>
+          ${cupoInsuficiente
+            ? '<span style="color:#ef4444; font-weight:600; font-size:12px;">⚠️ Las boletas superan los cupos libres</span>'
+            : hayErrores
+              ? '<span style="color:#ef4444; font-weight:600; font-size:12px;">⚠️ Hay números específicos ya ocupados</span>'
+              : '<span style="color:#15803d; font-weight:600; font-size:12px;">✅ Listo para registrar</span>'
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="modal__footer" style="padding:14px 20px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center;">
+      <button class="btn btn-ghost" onclick="state._registroMasivo=null; cerrarModal();">Cancelar</button>
+      <button class="btn btn-gold" onclick="_masivoGuardar()"
+        ${filasValidas === 0 || hayErrores || cupoInsuficiente ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+        💾 Registrar ${filasValidas} persona${filasValidas !== 1 ? 's' : ''} (${totalBoletas} boleta${totalBoletas !== 1 ? 's' : ''})
+      </button>
+    </div>
+  `;
+
+  abrirModal(html, { maxWidth: '940px' });
+}
+
+function _masivoAgregarFila() {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.filas.push({ id: Date.now() + Math.random(), nombre: '', telefono: '', cedula: '', asignacion: '1' });
+  _renderModalRegistroMasivo();
+}
+
+function _masivoEliminarFila(index) {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.filas.splice(index, 1);
+  if (m.filas.length === 0) {
+    m.filas.push({ id: 1, nombre: '', telefono: '', cedula: '', asignacion: '1' });
+  }
+  _renderModalRegistroMasivo();
+}
+
+function _masivoLimpiarFilas() {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.filas = [
+    { id: 1, nombre: '', telefono: '', cedula: '', asignacion: '1' },
+    { id: 2, nombre: '', telefono: '', cedula: '', asignacion: '1' },
+    { id: 3, nombre: '', telefono: '', cedula: '', asignacion: '1' }
+  ];
+  _renderModalRegistroMasivo();
+}
+
+function _masivoUpdateFila(index, field, value) {
+  const m = state._registroMasivo;
+  if (!m || !m.filas[index]) return;
+  m.filas[index][field] = value;
+  m.filas[index]._tocado = true;
+
+  // Actualizar solo etiquetas y resumen sin perder el foco del input
+  const parse = _masivoParseAsignacion(m.filas[index].asignacion, m.setLibres);
+  m.filas[index]._parse = parse;
+
+  const tr = document.getElementById(`masivo-fila-${index}`);
+  if (tr) {
+    const badgeDiv = tr.querySelector('td:nth-child(5) div');
+    if (badgeDiv) {
+      const tieneNombre = m.filas[index].nombre && m.filas[index].nombre.trim();
+      const badgeCls = !tieneNombre ? 'color:var(--ink-400);' : parse.valido ? 'color:#15803d; font-weight:600;' : 'color:#b91c1c; font-weight:700;';
+      badgeDiv.style.cssText = `font-size:11px; margin-top:3px; ${badgeCls}`;
+      badgeDiv.innerHTML = parse.valido ? parse.label : `❌ Número(s) ocupado(s): ${parse.ocupados.join(', ')}`;
+    }
+  }
+
+  // Recalcular totales
+  let totalBoletas = 0;
+  let hayErrores = false;
+  let filasValidas = 0;
+  m.filas.forEach(f => {
+    const p = f._parse || _masivoParseAsignacion(f.asignacion, m.setLibres);
+    if (f.nombre && f.nombre.trim()) {
+      filasValidas++;
+      totalBoletas += p.cantidad;
+      if (!p.valido) hayErrores = true;
+    }
+  });
+
+  const btnGuardar = document.querySelector('.modal__footer .btn-gold');
+  if (btnGuardar) {
+    const deshabilitado = filasValidas === 0 || hayErrores || totalBoletas > m.totalLibres;
+    btnGuardar.disabled = deshabilitado;
+    btnGuardar.style.opacity = deshabilitado ? '0.5' : '1';
+    btnGuardar.style.cursor = deshabilitado ? 'not-allowed' : 'pointer';
+    btnGuardar.innerHTML = `💾 Registrar ${filasValidas} persona${filasValidas !== 1 ? 's' : ''} (${totalBoletas} boleta${totalBoletas !== 1 ? 's' : ''})`;
+  }
+}
+
+function _masivoTogglePegar() {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.mostrarPegar = !m.mostrarPegar;
+  _renderModalRegistroMasivo();
+}
+
+function _masivoCambiarPago(estado) {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.estadoPago = estado;
+  _renderModalRegistroMasivo();
+}
+
+function _masivoCambiarMetodo(metodo) {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.metodoPago = metodo;
+}
+
+function _masivoParsearLinea(linea) {
+  if (!linea || !linea.trim()) return null;
+  const sep = linea.includes('\t') ? '\t' : /[,;]|(?:\s-\s)/;
+  const partes = linea.split(sep).map(p => p.trim()).filter(Boolean);
+  if (partes.length === 0) return null;
+
+  const nombre = partes[0];
+  const resto = partes.slice(1);
+  let telefono = '';
+  let cedula = '';
+  let asignacion = '1';
+
+  const noAsignados = [];
+  for (let i = 0; i < resto.length; i++) {
+    const p = resto[i];
+    const soloDigitos = p.replace(/\D/g, '');
+    if (!telefono && (/^(?:\+?57)?3\d{9}$/.test(soloDigitos) || (soloDigitos.length === 10 && soloDigitos.startsWith('3')))) {
+      telefono = soloDigitos;
+    } else {
+      noAsignados.push(p);
+    }
+  }
+
+  if (noAsignados.length >= 2) {
+    const primerPosibleCedula = noAsignados[0].replace(/\D/g, '');
+    if (primerPosibleCedula.length >= 6 && primerPosibleCedula.length <= 11) {
+      cedula = primerPosibleCedula;
+      noAsignados.shift();
+    }
+  }
+
+  const textoAsig = noAsignados.join(', ').trim();
+  if (textoAsig) asignacion = textoAsig;
+
+  return { nombre, telefono, cedula, asignacion };
+}
+
+function _masivoProcesarTextoPegado() {
+  const m = state._registroMasivo;
+  if (!m) return;
+  const textarea = document.getElementById('masivo-input-pegar');
+  const texto = textarea ? textarea.value : '';
+  if (!texto.trim()) return toast('Pega texto para procesar', 'info');
+
+  const lineas = texto.split('\n').map(l => l.trim()).filter(Boolean);
+  const nuevasFilas = [];
+
+  for (const linea of lineas) {
+    const p = _masivoParsearLinea(linea);
+    if (p && p.nombre) {
+      nuevasFilas.push({
+        id: Date.now() + Math.random(),
+        nombre: p.nombre,
+        telefono: p.telefono,
+        cedula: p.cedula,
+        asignacion: p.asignacion
+      });
+    }
+  }
+
+  if (nuevasFilas.length > 0) {
+    m.filas = nuevasFilas;
+    m.mostrarPegar = false;
+    toast(`✅ Se cargaron ${nuevasFilas.length} participantes a la tabla`);
+    _renderModalRegistroMasivo();
+  } else {
+    toast('No se encontraron líneas válidas', 'error');
+  }
+}
+
+async function _masivoGuardar() {
+  const m = state._registroMasivo;
+  if (!m) return;
+
+  const validas = m.filas.filter(f => f.nombre && f.nombre.trim());
+  if (validas.length === 0) return toast('Ingresa al menos un participante', 'error');
+
+  const payloadFilas = validas.map(f => {
+    const p = f._parse || _masivoParseAsignacion(f.asignacion, m.setLibres);
+    return {
+      nombre: f.nombre.trim(),
+      telefono: (f.telefono || '').trim(),
+      cedula: (f.cedula || '').trim(),
+      modo: p.modo,
+      cantidad: p.cantidad,
+      numeros: p.numeros
+    };
+  });
+
+  const body = {
+    filas: payloadFilas,
+    estado_pago: m.estadoPago,
+    metodo_pago: m.estadoPago === 'pagado' ? m.metodoPago : null,
+    observacion: m.observacion || null
+  };
+
+  try {
+    abrirModal(`
+      <div class="modal__header"><h3>Guardando participantes...</h3></div>
+      <div class="modal__body"><div class="empty-state"><div class="icon">⏳</div><p>Asignando boletas y asegurando la base de datos...</p></div></div>
+    `);
+
+    const r = await api('/rifas/' + m.rifaId + '/participantes/masivo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    state._registroMasivo = null;
+
+    // Reporte de resultados
+    const insertados = r.insertados || [];
+    const totalBoletas = insertados.reduce((sum, it) => sum + (it.cantidad || 1), 0);
+    const errores = r.errores || [];
+    const sinCupo = r.sinCupo || [];
+
+    const resumenHtml = `
+      <div class="modal__header">
+        <h3 style="margin:0; font-size:17px; color:#15803d;">🎉 ¡Registro Masivo Completado!</h3>
+        <button class="btn btn-ghost btn-sm" onclick="cerrarModal(); vistaDetalleRifa(${m.rifaId}, 'participantes');">✕</button>
+      </div>
+      <div class="modal__body" style="max-height:75vh; overflow-y:auto;">
+        <p style="margin:0 0 12px; font-size:14px;">
+          Se registraron <strong>${insertados.length} personas</strong> con un total de <strong>${totalBoletas} boletas</strong> en estado <em>${m.estadoPago}</em>.
+        </p>
+
+        ${errores.length ? `
+          <div style="background:rgba(239,68,68,0.1); border:1px solid #ef4444; border-radius:8px; padding:10px; margin-bottom:12px; font-size:12px;">
+            <strong style="color:#ef4444;">⚠️ ${errores.length} fila(s) con error:</strong>
+            <ul style="margin:4px 0 0; padding-left:16px;">
+              ${errores.map(e => `<li>${escapeHtml(e.nombre)}: ${escapeHtml(e.motivo)}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+
+        ${sinCupo.length ? `
+          <div style="background:rgba(245,158,11,0.1); border:1px solid #f59e0b; border-radius:8px; padding:10px; margin-bottom:12px; font-size:12px;">
+            <strong style="color:#f59e0b;">⚠️ ${sinCupo.length} personas sin cupo disponible:</strong>
+            <ul style="margin:4px 0 0; padding-left:16px;">
+              ${sinCupo.map(e => `<li>${escapeHtml(e.nombre)}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+
+        <div style="border:1px solid var(--line); border-radius:10px; overflow:hidden;">
+          <table class="tbl" style="margin:0; font-size:12px;">
+            <thead style="background:var(--line-soft);">
+              <tr>
+                <th>Persona</th>
+                <th>Teléfono</th>
+                <th>Cantidad</th>
+                <th>Números Asignados</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${insertados.map(it => `
+                <tr>
+                  <td><strong>${escapeHtml(it.nombre)}</strong></td>
+                  <td>${escapeHtml(it.telefono || '—')}</td>
+                  <td>${it.cantidad || 1}</td>
+                  <td>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                      ${(it.numeros || []).map(num => `<span style="background:rgba(212,160,23,0.15); border:1px solid var(--gold-500); padding:1px 6px; border-radius:4px; font-weight:600; font-size:11px; color:var(--gold-700);">${escapeHtml(num)}</span>`).join('')}
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn-primary" onclick="cerrarModal(); vistaDetalleRifa(${m.rifaId}, 'participantes');">
+          Ver Participantes
+        </button>
+      </div>
+    `;
+
+    abrirModal(resumenHtml, { maxWidth: '750px' });
+  } catch (err) {
+    cerrarModal();
+    toast('Error en registro masivo: ' + err.message, 'error');
+  }
 }
 
 // --- Registro masivo con selección manual de números ---
