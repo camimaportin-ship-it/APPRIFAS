@@ -2172,7 +2172,7 @@ async function startApp() {
     res.status(201).json({ ...creado, numeros: numsBoleta(creado) });
   });
 
-  // Función auxiliar para parsear líneas de registro masivo con soporte de múltiples números
+  // Función auxiliar para parsear líneas de registro masivo con soporte de múltiples números y pago
   function parsearLineaMasivo(linea) {
     if (!linea || !linea.trim()) return null;
     const sep = linea.includes('\t') ? '\t' : /[,;]|(?:\s-\s)/;
@@ -2186,10 +2186,34 @@ async function startApp() {
     let numeros = [];
     let cantidad = 1;
     let modo = 'azar';
+    let estado_pago = 'pendiente';
+    let metodo_pago = null;
 
     const noAsignados = [];
     for (let i = 0; i < resto.length; i++) {
       const p = resto[i];
+      const pLower = p.toLowerCase();
+
+      // Detección de pago en texto copiado
+      if (/^(?:pagad[oa]|cancelad[oa]|al\s*dia|pago)$/i.test(pLower)) {
+        estado_pago = 'pagado';
+        continue;
+      }
+      if (/^(?:pendiente|debe|sin\s*pagar)$/i.test(pLower)) {
+        estado_pago = 'pendiente';
+        continue;
+      }
+      if (/^(?:transferencia|transf|banco|nequi|daviplata)$/i.test(pLower)) {
+        estado_pago = 'pagado';
+        metodo_pago = 'transferencia';
+        continue;
+      }
+      if (/^(?:efectivo|cash)$/i.test(pLower)) {
+        estado_pago = 'pagado';
+        metodo_pago = 'efectivo';
+        continue;
+      }
+
       const soloDigitos = p.replace(/\D/g, '');
       if (!telefono && (/^(?:\+?57)?3\d{9}$/.test(soloDigitos) || (soloDigitos.length === 10 && soloDigitos.startsWith('3')))) {
         telefono = soloDigitos;
@@ -2222,11 +2246,16 @@ async function startApp() {
       }
     }
 
-    return { nombre, telefono, cedula, cantidad, numeros, modo };
+    if (estado_pago === 'pagado' && !metodo_pago) {
+      metodo_pago = 'efectivo';
+    }
+
+    return { nombre, telefono, cedula, cantidad, numeros, modo, estado_pago, metodo_pago };
   }
 
   // Registro masivo avanzado: tabla tipo hoja de cálculo o listado de texto/Excel
   // Soporta múltiples números por persona (por cantidad al azar o específicos elegidos)
+  // Soporta opciones de pago (pendiente / pagado con medio efectivo o transferencia)
   app.post('/api/rifas/:id/participantes/masivo', (req, res) => {
     const rifaId = req.params.id;
     liberarVencidos(rifaId);
@@ -2238,26 +2267,41 @@ async function startApp() {
     }
 
     const { texto, filas, estado_pago, metodo_pago, observacion } = req.body;
+    const pagoLoteEstado = ['pagado', 'pendiente'].includes(estado_pago) ? estado_pago : 'pendiente';
+    const pagoLoteMetodo = pagoLoteEstado === 'pagado' ? (metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo') : null;
+    const pagoObs = limpiarTexto(observacion, 200) || null;
 
     let items = [];
     if (Array.isArray(filas) && filas.length > 0) {
       items = filas.map(f => {
         let cant = Number(f.cantidad || 1);
         let nums = Array.isArray(f.numeros) ? f.numeros.map(Number).filter(n => Number.isFinite(n)) : [];
-        let modo = f.modo || (nums.length > 0 ? 'especifico' : 'azar');
-        if (modo === 'especifico' && nums.length > 0) {
-          cant = nums.length;
+        let modo = f.modo === 'especifico' ? 'especifico' : (nums.length > 0 ? 'especifico' : 'azar');
+        if (modo === 'especifico') {
+          if (nums.length === 0 && f.numerosTexto) {
+            const matches = String(f.numerosTexto).match(/\b\d+\b/g);
+            if (matches) nums = matches.map(Number);
+          }
+          cant = nums.length > 0 ? nums.length : 1;
         } else {
           modo = 'azar';
           if (!cant || cant < 1) cant = 1;
         }
+
+        const itemEstadoPago = ['pagado', 'pendiente'].includes(f.estado_pago) ? f.estado_pago : pagoLoteEstado;
+        const itemMetodoPago = itemEstadoPago === 'pagado'
+          ? (f.metodo_pago === 'transferencia' || (!f.metodo_pago && pagoLoteMetodo === 'transferencia') ? 'transferencia' : 'efectivo')
+          : null;
+
         return {
           nombre: limpiarTexto(f.nombre),
           telefono: limpiarTelefono(f.telefono),
           cedula: limpiarCedula(f.cedula),
           modo,
           cantidad: cant,
-          numeros: nums
+          numeros: nums,
+          estado_pago: itemEstadoPago,
+          metodo_pago: itemMetodoPago
         };
       }).filter(it => it.nombre);
     } else if (texto && typeof texto === 'string' && texto.trim()) {
@@ -2269,7 +2313,7 @@ async function startApp() {
     }
 
     if (items.length === 0) {
-      return res.status(400).json({ error: 'No se enviaron participantes para registrar' });
+      return res.status(400).json({ error: 'No se enviaron participantes válidos para registrar' });
     }
     if (items.length > 500) {
       return res.status(400).json({ error: 'Máximo 500 participantes por lote' });
@@ -2279,128 +2323,132 @@ async function startApp() {
     const chance = esChance(rifa);
     const nOport = nOportunidades(rifa);
 
-    const pagoEstado = ['pagado', 'pendiente'].includes(estado_pago) ? estado_pago : 'pendiente';
-    const pagoFecha = pagoEstado === 'pagado' ? new Date().toISOString() : null;
-    const pagoMetodo = pagoEstado === 'pagado' ? (limpiarTexto(metodo_pago, 30) || 'efectivo') : null;
-    const pagoObs = limpiarTexto(observacion, 200) || null;
-
     const resultado = { insertados: [], errores: [], sinCupo: [] };
 
-    const procesar = db.transaction(() => {
-      let setLibres = new Set();
-      let mapaGrupos = [];
-      let boletasChanceLibres = [];
-
-      if (chance) {
-        boletasChanceLibres = db.prepare("SELECT * FROM boletas_chance WHERE rifa_id=? AND estado='libre'").all(rifaId);
-      } else if (esCuatro) {
-        const grupos = asegurarGrupos(rifa).map((g, idx) => ({ idx, numeros: g }));
-        mapaGrupos = grupos.filter(gr => estadoGrupo(rifa, gr.numeros).estado === 'libre');
-      } else {
-        const libres = db.prepare("SELECT numero FROM numeros WHERE rifa_id=? AND estado='libre' ORDER BY numero ASC").all(rifaId);
-        setLibres = new Set(libres.map(r => r.numero));
-      }
-
-      const insertarUno = chance
-        ? db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, simbolo, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        : db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?)');
-
-      const marcarNumero = db.prepare("UPDATE numeros SET estado=?, participante_id=?, fecha_reservado=datetime('now','localtime'), fecha_pagado=? WHERE rifa_id=? AND numero=?");
-      const marcarBoleta = db.prepare("UPDATE boletas_chance SET estado=?, participante_id=?, fecha_reservado=datetime('now','localtime') WHERE id=?");
-
-      for (const item of items) {
-        const nombre = limpiarTexto(item.nombre);
-        if (!nombre) {
-          resultado.errores.push({ nombre: 'Desconocido', motivo: 'Nombre obligatorio' });
-          continue;
-        }
-        const telefono = limpiarTelefono(item.telefono);
-        const cedula = limpiarCedula(item.cedula);
-
-        let asignados = [];
-        let simboloAsignado = null;
-        let boletasChanceAsignadas = [];
+    try {
+      const procesar = db.transaction(() => {
+        let setLibres = new Set();
+        let mapaGrupos = [];
+        let boletasChanceLibres = [];
 
         if (chance) {
-          const cant = Math.max(1, item.cantidad || 1);
-          if (boletasChanceLibres.length < cant) {
-            resultado.sinCupo.push({ nombre, cedula, telefono, motivo: `No hay suficientes boletas libres (solicitadas: ${cant}, libres: ${boletasChanceLibres.length})` });
-            continue;
-          }
-          boletasChanceAsignadas = boletasChanceLibres.splice(0, cant);
-          asignados = boletasChanceAsignadas.map(b => b.numero);
-          simboloAsignado = boletasChanceAsignadas[0].simbolo;
+          boletasChanceLibres = db.prepare("SELECT * FROM boletas_chance WHERE rifa_id=? AND estado='libre'").all(rifaId);
         } else if (esCuatro) {
-          const cant = Math.max(1, item.cantidad || 1);
-          if (mapaGrupos.length < cant) {
-            resultado.sinCupo.push({ nombre, cedula, telefono, motivo: `No hay suficientes grupos libres (solicitados: ${cant}, libres: ${mapaGrupos.length})` });
+          const grupos = asegurarGrupos(rifa).map((g, idx) => ({ idx, numeros: g }));
+          mapaGrupos = grupos.filter(gr => estadoGrupo(rifa, gr.numeros).estado === 'libre');
+        } else {
+          const libres = db.prepare("SELECT numero FROM numeros WHERE rifa_id=? AND estado='libre' ORDER BY numero ASC").all(rifaId);
+          setLibres = new Set(libres.map(r => Number(r.numero)));
+        }
+
+        const insertarUno = chance
+          ? db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, simbolo, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+          : db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?)');
+
+        const marcarNumero = db.prepare("UPDATE numeros SET estado=?, participante_id=?, fecha_reservado=datetime('now','localtime') WHERE rifa_id=? AND numero=?");
+        const marcarBoleta = db.prepare("UPDATE boletas_chance SET estado=?, participante_id=?, fecha_reservado=datetime('now','localtime') WHERE id=?");
+
+        for (const item of items) {
+          const nombre = item.nombre;
+          if (!nombre) {
+            resultado.errores.push({ nombre: 'Desconocido', motivo: 'Nombre obligatorio' });
             continue;
           }
-          const gruposTomados = mapaGrupos.splice(0, cant);
-          asignados = gruposTomados.flatMap(g => g.numeros);
-        } else {
-          if (item.modo === 'especifico' && item.numeros && item.numeros.length > 0) {
-            const noDisponibles = [];
-            for (const num of item.numeros) {
-              if (!setLibres.has(num)) noDisponibles.push(fmtNumero(rifa, num));
-            }
-            if (noDisponibles.length > 0) {
-              resultado.errores.push({ nombre, cedula, telefono, motivo: `Número(s) no disponible(s): ${noDisponibles.join(', ')}` });
-              continue;
-            }
-            for (const num of item.numeros) setLibres.delete(num);
-            asignados = [...item.numeros];
-          } else {
+          const telefono = item.telefono;
+          const cedula = item.cedula;
+          const filaEstadoPago = item.estado_pago === 'pagado' ? 'pagado' : 'pendiente';
+          const filaMetodoPago = filaEstadoPago === 'pagado' ? (item.metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo') : null;
+          const filaFechaPago = filaEstadoPago === 'pagado' ? new Date().toISOString() : null;
+
+          let asignados = [];
+          let simboloAsignado = null;
+          let boletasChanceAsignadas = [];
+
+          if (chance) {
             const cant = Math.max(1, item.cantidad || 1);
-            if (setLibres.size < cant) {
-              resultado.sinCupo.push({ nombre, cedula, telefono, motivo: `No hay suficientes números libres (solicitados: ${cant}, libres: ${setLibres.size})` });
+            if (boletasChanceLibres.length < cant) {
+              resultado.sinCupo.push({ nombre, cedula, telefono, motivo: `No hay suficientes boletas libres (solicitadas: ${cant}, libres: ${boletasChanceLibres.length})` });
               continue;
             }
-            const disponiblesArr = Array.from(setLibres);
-            const elegidos = shuffle(disponiblesArr).slice(0, cant);
-            for (const num of elegidos) setLibres.delete(num);
-            asignados = elegidos;
+            boletasChanceAsignadas = boletasChanceLibres.splice(0, cant);
+            asignados = boletasChanceAsignadas.map(b => b.numero);
+            simboloAsignado = boletasChanceAsignadas[0].simbolo;
+          } else if (esCuatro) {
+            const cant = Math.max(1, item.cantidad || 1);
+            if (mapaGrupos.length < cant) {
+              resultado.sinCupo.push({ nombre, cedula, telefono, motivo: `No hay suficientes grupos libres (solicitados: ${cant}, libres: ${mapaGrupos.length})` });
+              continue;
+            }
+            const gruposTomados = mapaGrupos.splice(0, cant);
+            asignados = gruposTomados.flatMap(g => g.numeros);
+          } else {
+            if (item.modo === 'especifico' && item.numeros && item.numeros.length > 0) {
+              const noDisponibles = [];
+              for (const num of item.numeros) {
+                if (!setLibres.has(num)) noDisponibles.push(fmtNumero(rifa, num));
+              }
+              if (noDisponibles.length > 0) {
+                resultado.errores.push({ nombre, cedula, telefono, motivo: `Número(s) no disponible(s) o ya ocupados: ${noDisponibles.join(', ')}` });
+                continue;
+              }
+              for (const num of item.numeros) setLibres.delete(num);
+              asignados = [...item.numeros];
+            } else {
+              const cant = Math.max(1, item.cantidad || 1);
+              if (setLibres.size < cant) {
+                resultado.sinCupo.push({ nombre, cedula, telefono, motivo: `No hay suficientes números libres (solicitados: ${cant}, libres: ${setLibres.size})` });
+                continue;
+              }
+              const disponiblesArr = Array.from(setLibres);
+              const elegidos = shuffle(disponiblesArr).slice(0, cant);
+              for (const num of elegidos) setLibres.delete(num);
+              asignados = elegidos;
+            }
           }
+
+          asignados.sort((a, b) => a - b);
+
+          const labelsNumeros = chance
+            ? boletasChanceAsignadas.map(b => ticketLabel(b.numero, b.simbolo, rifa))
+            : asignados.map(n => fmtNumero(rifa, n));
+
+          const info = chance
+            ? insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], simboloAsignado, JSON.stringify(labelsNumeros), filaEstadoPago, filaFechaPago, filaMetodoPago, pagoObs)
+            : insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], JSON.stringify(asignados), filaEstadoPago, filaFechaPago, filaMetodoPago, pagoObs);
+
+          const nuevoId = info.lastInsertRowid;
+
+          if (chance) {
+            for (const b of boletasChanceAsignadas) {
+              marcarBoleta.run(filaEstadoPago, nuevoId, b.id);
+            }
+          } else {
+            for (const n of asignados) {
+              marcarNumero.run(filaEstadoPago, nuevoId, rifaId, n);
+            }
+          }
+
+          resultado.insertados.push({
+            id: nuevoId,
+            nombre,
+            cedula,
+            telefono,
+            cantidad: asignados.length,
+            numeros: labelsNumeros,
+            estado_pago: filaEstadoPago,
+            metodo_pago: filaMetodoPago
+          });
         }
+      });
 
-        asignados.sort((a, b) => a - b);
-
-        const labelsNumeros = chance
-          ? boletasChanceAsignadas.map(b => ticketLabel(b.numero, b.simbolo, rifa))
-          : asignados.map(n => fmtNumero(rifa, n));
-
-        const info = chance
-          ? insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], simboloAsignado, JSON.stringify(labelsNumeros), pagoEstado, pagoFecha, pagoMetodo, pagoObs)
-          : insertarUno.run(rifaId, nombre, cedula, telefono, asignados[0], JSON.stringify(asignados), pagoEstado, pagoFecha, pagoMetodo, pagoObs);
-
-        const nuevoId = info.lastInsertRowid;
-
-        if (chance) {
-          for (const b of boletasChanceAsignadas) {
-            marcarBoleta.run(pagoEstado, nuevoId, b.id);
-          }
-        } else {
-          for (const n of asignados) {
-            marcarNumero.run(pagoEstado, nuevoId, pagoFecha, rifaId, n);
-          }
-        }
-
-        resultado.insertados.push({
-          id: nuevoId,
-          nombre,
-          cedula,
-          telefono,
-          cantidad: asignados.length,
-          numeros: labelsNumeros,
-          estado_pago: pagoEstado
-        });
-      }
-    });
-
-    procesar();
+      procesar();
+    } catch (err) {
+      console.error('[MASIVO] Error en transacción:', err);
+      return res.status(400).json({ error: 'Error procesando el lote: ' + (err.message || String(err)) });
+    }
 
     const totalBoletas = resultado.insertados.reduce((sum, it) => sum + (it.cantidad || 1), 0);
-    registrarHistorial(rifaId, 'registro-masivo', `${resultado.insertados.length} personas registradas (${totalBoletas} boletas), ${resultado.errores.length} errores, ${resultado.sinCupo.length} sin cupo`, req.usuario.usuario);
+    registrarHistorial(rifaId, 'registro-masivo', `${resultado.insertados.length} personas registradas (${totalBoletas} boletas), ${resultado.errores.length} errores, ${resultado.sinCupo.length} sin cupo`, req.usuario?.usuario || 'admin');
     res.status(201).json(resultado);
   });
 

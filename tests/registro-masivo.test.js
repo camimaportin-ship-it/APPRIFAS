@@ -13,10 +13,34 @@ export function parsearLineaMasivo(linea) {
   let numeros = [];
   let cantidad = 1;
   let modo = 'azar';
+  let estado_pago = 'pendiente';
+  let metodo_pago = null;
 
   const noAsignados = [];
   for (let i = 0; i < resto.length; i++) {
     const p = resto[i];
+    const pLower = p.toLowerCase();
+
+    // Detección de pago en texto copiado
+    if (/^(?:pagad[oa]|cancelad[oa]|al\s*dia|pago)$/i.test(pLower)) {
+      estado_pago = 'pagado';
+      continue;
+    }
+    if (/^(?:pendiente|debe|sin\s*pagar)$/i.test(pLower)) {
+      estado_pago = 'pendiente';
+      continue;
+    }
+    if (/^(?:transferencia|transf|banco|nequi|daviplata)$/i.test(pLower)) {
+      estado_pago = 'pagado';
+      metodo_pago = 'transferencia';
+      continue;
+    }
+    if (/^(?:efectivo|cash)$/i.test(pLower)) {
+      estado_pago = 'pagado';
+      metodo_pago = 'efectivo';
+      continue;
+    }
+
     const soloDigitos = p.replace(/\D/g, '');
     if (!telefono && (/^(?:\+?57)?3\d{9}$/.test(soloDigitos) || (soloDigitos.length === 10 && soloDigitos.startsWith('3')))) {
       telefono = soloDigitos;
@@ -49,7 +73,11 @@ export function parsearLineaMasivo(linea) {
     }
   }
 
-  return { nombre, telefono, cedula, cantidad, numeros, modo };
+  if (estado_pago === 'pagado' && !metodo_pago) {
+    metodo_pago = 'efectivo';
+  }
+
+  return { nombre, telefono, cedula, cantidad, numeros, modo, estado_pago, metodo_pago };
 }
 
 describe('parseador inteligente de registro masivo', () => {
@@ -61,7 +89,9 @@ describe('parseador inteligente de registro masivo', () => {
       cedula: '',
       cantidad: 1,
       numeros: [],
-      modo: 'azar'
+      modo: 'azar',
+      estado_pago: 'pendiente',
+      metodo_pago: null
     });
   });
 
@@ -71,6 +101,7 @@ describe('parseador inteligente de registro masivo', () => {
     expect(res.telefono).toBe('3007654321');
     expect(res.cantidad).toBe(3);
     expect(res.modo).toBe('azar');
+    expect(res.estado_pago).toBe('pendiente');
   });
 
   it('parsea persona con números específicos elegidos (ej: 05, 12, 89)', () => {
@@ -90,7 +121,9 @@ describe('parseador inteligente de registro masivo', () => {
       cedula: '10203040',
       cantidad: 4,
       numeros: [],
-      modo: 'azar'
+      modo: 'azar',
+      estado_pago: 'pendiente',
+      metodo_pago: null
     });
   });
 
@@ -101,5 +134,22 @@ describe('parseador inteligente de registro masivo', () => {
     expect(res.telefono).toBe('3112223344');
     expect(res.modo).toBe('especifico');
     expect(res.numeros).toEqual([7, 45]);
+  });
+
+  it('detecta estado pagado con transferencia bancaria', () => {
+    const res = parsearLineaMasivo('Andrea Mora, 3150001122, 2, pagado, transferencia');
+    expect(res.nombre).toBe('Andrea Mora');
+    expect(res.cantidad).toBe(2);
+    expect(res.estado_pago).toBe('pagado');
+    expect(res.metodo_pago).toBe('transferencia');
+  });
+
+  it('detecta estado pagado con efectivo', () => {
+    const res = parsearLineaMasivo('Felipe Cruz, 3019998877, 12 45, pagado, efectivo');
+    expect(res.nombre).toBe('Felipe Cruz');
+    expect(res.modo).toBe('especifico');
+    expect(res.numeros).toEqual([12, 45]);
+    expect(res.estado_pago).toBe('pagado');
+    expect(res.metodo_pago).toBe('efectivo');
   });
 });

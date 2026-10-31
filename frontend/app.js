@@ -2570,35 +2570,42 @@ function modalRegistroChance(rifaId, preseleccion) {
 }
 
 // -----------------------------------------------------------------------------
-// REGISTRO MASIVO TIPO HOJA DE CÁLCULO (Spreadsheet interactiva)
-// Permite registrar múltiples personas y asignar varios números por persona
-// (soporta tanto cantidad al azar como números específicos elegidos)
+// REGISTRO MASIVO INTERACTIVO (Tabla tipo hoja de cálculo)
+// Soporta modo explícito de asignación (Al azar vs Específico),
+// estado de pago (Pendiente vs Ya pagó), y medio de pago (Efectivo vs Transferencia)
+// tanto por participante como de manera global para todo el lote.
 // -----------------------------------------------------------------------------
 
-function _masivoParseAsignacion(str, setLibres) {
+function _masivoParseNumerosEspecificos(str, setLibres) {
   const s = String(str || '').trim();
-  if (!s || s === '1') {
-    return { modo: 'azar', cantidad: 1, numeros: [], ocupados: [], valido: true, label: '🎲 1 boleta al azar' };
+  if (!s) {
+    return { valido: false, numeros: [], ocupados: [], label: 'Escribe los números (ej: 05, 12, 89)' };
   }
-  const matchCant = s.match(/^(?:x\s*|cant\s*:?\s*)?(\d+)(?:\s*(?:boletas?|nums?|números?))?$/i);
-  if (matchCant && Number(matchCant[1]) <= 100 && !s.startsWith('0') && s.length <= 3) {
-    const cant = Math.max(1, parseInt(matchCant[1], 10));
-    return { modo: 'azar', cantidad: cant, numeros: [], ocupados: [], valido: true, label: `🎲 ${cant} boletas al azar` };
+  const matches = s.match(/\b\d+\b/g);
+  if (!matches || matches.length === 0) {
+    return { valido: false, numeros: [], ocupados: [], label: 'Formato inválido. Usa números (ej: 05, 12)' };
   }
-  const matchNums = s.match(/\b\d+\b/g);
-  if (matchNums && matchNums.length > 0) {
-    const nums = matchNums.map(Number);
-    const ocupados = [];
-    if (setLibres) {
-      for (const n of nums) {
-        if (!setLibres.has(n)) ocupados.push(n);
-      }
+  const nums = matches.map(Number);
+  const ocupados = [];
+  if (setLibres) {
+    for (const n of nums) {
+      if (!setLibres.has(n)) ocupados.push(n);
     }
-    const valido = ocupados.length === 0;
-    const label = `🎯 ${nums.length} número(s): [${nums.join(', ')}]`;
-    return { modo: 'especifico', cantidad: nums.length, numeros: nums, ocupados, valido, label };
   }
-  return { modo: 'azar', cantidad: 1, numeros: [], ocupados: [], valido: true, label: '🎲 1 boleta al azar' };
+  if (ocupados.length > 0) {
+    return {
+      valido: false,
+      numeros: nums,
+      ocupados,
+      label: '❌ Ocupado(s): ' + ocupados.join(', ')
+    };
+  }
+  return {
+    valido: true,
+    numeros: nums,
+    ocupados: [],
+    label: '🎯 ' + nums.length + ' número(s): [' + nums.join(', ') + ']'
+  };
 }
 
 async function modalRegistroMasivo(rifaId) {
@@ -2635,13 +2642,10 @@ async function modalRegistroMasivo(rifaId) {
       setLibres,
       totalLibres: libresArray.length,
       mostrarPegar: false,
-      estadoPago: 'pendiente',
-      metodoPago: 'efectivo',
-      observacion: '',
       filas: [
-        { id: 1, nombre: '', telefono: '', cedula: '', asignacion: '1' },
-        { id: 2, nombre: '', telefono: '', cedula: '', asignacion: '1' },
-        { id: 3, nombre: '', telefono: '', cedula: '', asignacion: '1' }
+        { id: 1, nombre: '', telefono: '', cedula: '', modo: 'azar', cantidad: 1, numerosTexto: '', estadoPago: 'pendiente', metodoPago: 'efectivo' },
+        { id: 2, nombre: '', telefono: '', cedula: '', modo: 'azar', cantidad: 1, numerosTexto: '', estadoPago: 'pendiente', metodoPago: 'efectivo' },
+        { id: 3, nombre: '', telefono: '', cedula: '', modo: 'azar', cantidad: 1, numerosTexto: '', estadoPago: 'pendiente', metodoPago: 'efectivo' }
       ]
     };
 
@@ -2656,18 +2660,24 @@ function _renderModalRegistroMasivo() {
   const m = state._registroMasivo;
   if (!m) return;
 
-  // Cálculos dinámicos
+  // Cálculos de totales y validación
   let totalBoletas = 0;
   let hayErrores = false;
   let filasValidas = 0;
 
-  m.filas.forEach(f => {
-    const parse = _masivoParseAsignacion(f.asignacion, m.setLibres);
-    f._parse = parse;
+  m.filas.forEach((f, i) => {
+    if (f.modo === 'especifico') {
+      f._parse = _masivoParseNumerosEspecificos(f.numerosTexto, m.setLibres);
+    } else {
+      const c = Math.max(1, parseInt(f.cantidad, 10) || 1);
+      f._parse = { valido: true, cantidad: c, numeros: [], ocupados: [], label: '🎲 ' + c + ' boleta(s) al azar' };
+    }
+
     if (f.nombre && f.nombre.trim()) {
       filasValidas++;
-      totalBoletas += parse.cantidad;
-      if (!parse.valido) hayErrores = true;
+      const cant = f.modo === 'especifico' ? (f._parse.numeros.length || 0) : f._parse.cantidad;
+      totalBoletas += cant;
+      if (!f._parse.valido) hayErrores = true;
     }
   });
 
@@ -2684,10 +2694,10 @@ function _renderModalRegistroMasivo() {
       <button class="btn btn-ghost btn-sm" onclick="state._registroMasivo=null; cerrarModal();" style="font-size:16px;">✕</button>
     </div>
 
-    <div class="modal__body" style="padding:16px 20px; max-height:calc(85vh - 130px); overflow-y:auto;">
+    <div class="modal__body" style="padding:14px 18px; max-height:calc(85vh - 120px); overflow-y:auto;">
       <!-- Barra superior de acciones -->
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
           <button type="button" class="btn btn-primary btn-sm" onclick="_masivoAgregarFila()">
             ➕ Agregar fila
           </button>
@@ -2699,39 +2709,38 @@ function _renderModalRegistroMasivo() {
           </button>
         </div>
 
-        <!-- Opciones de pago del lote -->
-        <div style="display:flex; align-items:center; gap:8px; background:var(--line-soft); padding:4px 10px; border-radius:10px;">
-          <span style="font-size:12px; font-weight:600; color:var(--ink-700);">Estado de pago:</span>
-          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;">
-            <input type="radio" name="masivo-pago-opt" value="pendiente" ${m.estadoPago === 'pendiente' ? 'checked' : ''} onchange="_masivoCambiarPago('pendiente')">
-            ⏳ Pendiente
-          </label>
-          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;">
-            <input type="radio" name="masivo-pago-opt" value="pagado" ${m.estadoPago === 'pagado' ? 'checked' : ''} onchange="_masivoCambiarPago('pagado')">
-            ✅ Pagado
-          </label>
-          ${m.estadoPago === 'pagado' ? `
-            <select class="input" style="font-size:12px; padding:3px 8px; width:auto;" onchange="_masivoCambiarMetodo(this.value)">
-              <option value="efectivo" ${m.metodoPago === 'efectivo' ? 'selected' : ''}>💵 Efectivo</option>
-              <option value="nequi" ${m.metodoPago === 'nequi' ? 'selected' : ''}>🟣 Nequi</option>
-              <option value="daviplata" ${m.metodoPago === 'daviplata' ? 'selected' : ''}>🔴 Daviplata</option>
-              <option value="transferencia" ${m.metodoPago === 'transferencia' ? 'selected' : ''}>🏦 Transferencia</option>
-              <option value="otro" ${m.metodoPago === 'otro' ? 'selected' : ''}>💳 Otro</option>
-            </select>
-          ` : ''}
+        <!-- Acciones en lote: Aplicar a todas las filas -->
+        <div style="display:flex; align-items:center; gap:6px; background:var(--line-soft); padding:4px 10px; border-radius:10px; flex-wrap:wrap;">
+          <span style="font-size:11px; font-weight:600; color:var(--ink-600); text-transform:uppercase;">Aplicar a todos:</span>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px; padding:3px 7px;" onclick="_masivoAplicarModoATodos('azar')" title="Poner todas las filas en modo al azar">
+            🎲 Al azar
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px; padding:3px 7px;" onclick="_masivoAplicarModoATodos('especifico')" title="Poner todas las filas en modo números específicos">
+            🎯 Específico
+          </button>
+          <span style="color:var(--line); font-size:12px;">|</span>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px; padding:3px 7px; color:#d97706;" onclick="_masivoAplicarPagoATodos('pendiente')" title="Marcar todas las filas como pendientes">
+            ⏳ Pendientes
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px; padding:3px 7px; color:#15803d;" onclick="_masivoAplicarPagoATodos('pagado', 'efectivo')" title="Marcar todas las filas como pagadas en efectivo">
+            💵 Efectivo
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px; padding:3px 7px; color:#2563eb;" onclick="_masivoAplicarPagoATodos('pagado', 'transferencia')" title="Marcar todas las filas como pagadas por transferencia">
+            🏦 Transferencia
+          </button>
         </div>
       </div>
 
-      <!-- Panel desplegable de importación rápida desde Excel o portapapeles -->
+      <!-- Panel desplegable de importación rápida desde Excel o texto -->
       ${m.mostrarPegar ? `
-        <div style="background:var(--line-soft); border:1px dashed var(--line); border-radius:12px; padding:12px; margin-bottom:14px;">
-          <p style="font-size:12px; font-weight:600; margin:0 0 6px;">📥 Pegar datos copiados de Excel o lista de texto:</p>
+        <div style="background:var(--line-soft); border:1px dashed var(--line); border-radius:12px; padding:12px; margin-bottom:12px;">
+          <p style="font-size:12px; font-weight:600; margin:0 0 4px;">📥 Pegar datos copiados de Excel o lista de texto:</p>
           <p style="font-size:11px; color:var(--ink-600); margin:0 0 8px;">
-            Acepta celdas de Excel (tabulación) o texto separado por comas. Columnas admitidas: <code>Nombre</code>, <code>Teléfono</code>, <code>Cédula</code>, <code>Cantidad ó Números</code>.
+            Detecta automáticamente <code>Nombre</code>, <code>Teléfono</code>, <code>Cédula</code>, <code>Cantidad ó Números</code> y estado de pago (<code>pagado</code>, <code>transferencia</code>, <code>efectivo</code>).
           </p>
-          <textarea id="masivo-input-pegar" class="input" rows="4" style="font-family:monospace; font-size:12px;" placeholder="Juan Pérez	3001234567	10203040	3
-María Gómez	3007654321		05, 12, 89
-Carlos Ruiz	3129876543	79123456	1"></textarea>
+          <textarea id="masivo-input-pegar" class="input" rows="4" style="font-family:monospace; font-size:12px;" placeholder="Juan Pérez	3001234567	10203040	3	pagado	transferencia
+María Gómez	3007654321		05, 12, 89	pagado	efectivo
+Carlos Ruiz	3129876543	79123456	1	pendiente"></textarea>
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
             <button type="button" class="btn btn-ghost btn-sm" onclick="_masivoTogglePegar()">Cerrar</button>
             <button type="button" class="btn btn-gold btn-sm" onclick="_masivoProcesarTextoPegado()">📥 Cargar filas a la tabla</button>
@@ -2739,56 +2748,112 @@ Carlos Ruiz	3129876543	79123456	1"></textarea>
         </div>
       ` : ''}
 
-      <!-- Tabla interactiva tipo hoja de cálculo -->
+      <!-- Tabla interactiva tipo Excel -->
       <div style="overflow-x:auto; border:1px solid var(--line); border-radius:12px;">
-        <table class="tbl" style="margin:0; width:100%; border-collapse:collapse;">
+        <table class="tbl" style="margin:0; width:100%; border-collapse:collapse; min-width:880px;">
           <thead style="background:var(--line-soft);">
             <tr>
-              <th style="width:40px; text-align:center;">#</th>
-              <th style="min-width:180px;">Nombre Completo *</th>
-              <th style="min-width:130px;">Teléfono</th>
-              <th style="min-width:120px;">Cédula</th>
-              <th style="min-width:210px;">
-                Asignación de Números (Mixto)
-                <span title="Escribe una cantidad (ej: 3) para números al azar, o números exactos (ej: 05, 12, 89)" style="cursor:help; font-size:11px; color:var(--gold-600);">ℹ️</span>
-              </th>
-              <th style="width:50px; text-align:center;"></th>
+              <th style="width:36px; text-align:center;">#</th>
+              <th style="min-width:170px;">Nombre Completo *</th>
+              <th style="min-width:115px;">Teléfono</th>
+              <th style="min-width:105px;">Cédula</th>
+              <th style="min-width:125px;">Asignación</th>
+              <th style="min-width:175px;">Boletas / Números</th>
+              <th style="min-width:125px;">Estado Pago</th>
+              <th style="min-width:130px;">Medio de Pago</th>
+              <th style="width:40px; text-align:center;"></th>
             </tr>
           </thead>
           <tbody>
             ${m.filas.map((f, i) => {
               const parse = f._parse;
               const tieneNombre = f.nombre && f.nombre.trim();
-              const badgeCls = !tieneNombre ? 'color:var(--ink-400);' : parse.valido ? 'color:#15803d; font-weight:600;' : 'color:#b91c1c; font-weight:700;';
+              const badgeCls = !tieneNombre
+                ? 'color:var(--ink-400);'
+                : parse.valido
+                  ? (f.modo === 'especifico' ? 'color:#2563eb; font-weight:600;' : 'color:#15803d; font-weight:600;')
+                  : 'color:#b91c1c; font-weight:700;';
+
               return `
                 <tr id="masivo-fila-${i}" style="border-bottom:1px solid var(--line-soft);">
                   <td style="text-align:center; font-size:12px; color:var(--ink-500); font-weight:600;">${i + 1}</td>
-                  <td style="padding:6px 8px;">
+
+                  <!-- Nombre -->
+                  <td style="padding:6px 6px;">
                     <input class="input" value="${escapeHtml(f.nombre)}" placeholder="Ej: Juan Pérez"
                       oninput="_masivoUpdateFila(${i}, 'nombre', this.value)"
-                      style="font-size:13px; padding:6px 8px; ${!tieneNombre && f._tocado ? 'border-color:#ef4444;' : ''}">
+                      style="font-size:12px; padding:6px 8px; ${!tieneNombre && f._tocado ? 'border-color:#ef4444;' : ''}">
                   </td>
-                  <td style="padding:6px 8px;">
+
+                  <!-- Teléfono -->
+                  <td style="padding:6px 6px;">
                     <input class="input" value="${escapeHtml(f.telefono)}" placeholder="3001234567" inputmode="tel"
                       oninput="_masivoUpdateFila(${i}, 'telefono', this.value)"
-                      style="font-size:13px; padding:6px 8px;">
+                      style="font-size:12px; padding:6px 8px;">
                   </td>
-                  <td style="padding:6px 8px;">
+
+                  <!-- Cédula -->
+                  <td style="padding:6px 6px;">
                     <input class="input" value="${escapeHtml(f.cedula)}" placeholder="Opcional" inputmode="numeric"
                       oninput="_masivoUpdateFila(${i}, 'cedula', this.value)"
-                      style="font-size:13px; padding:6px 8px;">
+                      style="font-size:12px; padding:6px 8px;">
                   </td>
-                  <td style="padding:6px 8px;">
-                    <input class="input" value="${escapeHtml(f.asignacion)}" placeholder="Ej: 3 (azar) ó 05, 12, 89"
-                      oninput="_masivoUpdateFila(${i}, 'asignacion', this.value)"
-                      onkeydown="if(event.key==='Enter'){ event.preventDefault(); _masivoAgregarFila(); }"
-                      style="font-size:13px; padding:6px 8px; ${!parse.valido ? 'border-color:#ef4444; background:rgba(239,68,68,0.06);' : ''}">
-                    <div style="font-size:11px; margin-top:3px; ${badgeCls}">
-                      ${parse.valido ? parse.label : `❌ Número(s) ocupado(s): ${parse.ocupados.join(', ')}`}
-                    </div>
+
+                  <!-- Selector explícito de Modo: Al azar vs Específico -->
+                  <td style="padding:6px 6px;">
+                    <select class="input" style="font-size:12px; padding:5px 6px; font-weight:600;"
+                      onchange="_masivoCambiarModoFila(${i}, this.value)">
+                      <option value="azar" ${f.modo === 'azar' ? 'selected' : ''}>🎲 Al azar</option>
+                      <option value="especifico" ${f.modo === 'especifico' ? 'selected' : ''}>🎯 Específico</option>
+                    </select>
                   </td>
-                  <td style="text-align:center; padding:6px;">
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="_masivoEliminarFila(${i})" title="Quitar fila" style="color:#ef4444; padding:4px 8px; font-weight:bold;">
+
+                  <!-- Entrada según modo (Cantidad al azar vs Números específicos) -->
+                  <td style="padding:6px 6px;">
+                    ${f.modo === 'azar' ? `
+                      <div style="display:flex; align-items:center; gap:6px;">
+                        <input type="number" min="1" max="100" class="input" style="width:65px; font-size:12px; text-align:center; padding:5px;"
+                          value="${f.cantidad || 1}"
+                          oninput="_masivoUpdateFila(${i}, 'cantidad', this.value)"
+                          onkeydown="if(event.key==='Enter'){ event.preventDefault(); _masivoAgregarFila(); }">
+                        <span style="font-size:11px; color:var(--ink-500); white-space:nowrap;">boleta(s)</span>
+                      </div>
+                      <div style="font-size:11px; margin-top:2px; ${badgeCls}">${parse.label}</div>
+                    ` : `
+                      <input type="text" class="input" style="font-size:12px; padding:5px 8px; ${!parse.valido ? 'border-color:#ef4444; background:rgba(239,68,68,0.06);' : ''}"
+                        value="${escapeHtml(f.numerosTexto || '')}"
+                        placeholder="Ej: 05, 12, 89"
+                        oninput="_masivoUpdateFila(${i}, 'numerosTexto', this.value)"
+                        onkeydown="if(event.key==='Enter'){ event.preventDefault(); _masivoAgregarFila(); }">
+                      <div style="font-size:11px; margin-top:2px; ${badgeCls}">${parse.label}</div>
+                    `}
+                  </td>
+
+                  <!-- Selector explícito de Estado de Pago: Pendiente vs Ya pagó -->
+                  <td style="padding:6px 6px;">
+                    <select class="input" style="font-size:12px; padding:5px 6px; font-weight:600; color:${f.estadoPago === 'pagado' ? '#15803d' : '#d97706'};"
+                      onchange="_masivoCambiarPagoFila(${i}, this.value)">
+                      <option value="pendiente" ${f.estadoPago === 'pendiente' ? 'selected' : ''}>⏳ Pendiente</option>
+                      <option value="pagado" ${f.estadoPago === 'pagado' ? 'selected' : ''}>✅ Ya pagó</option>
+                    </select>
+                  </td>
+
+                  <!-- Selector de Medio de Pago: Transferencia o Efectivo -->
+                  <td style="padding:6px 6px;">
+                    ${f.estadoPago === 'pagado' ? `
+                      <select class="input" style="font-size:12px; padding:5px 6px; font-weight:500;"
+                        onchange="_masivoCambiarMetodoFila(${i}, this.value)">
+                        <option value="efectivo" ${f.metodoPago === 'efectivo' ? 'selected' : ''}>💵 Efectivo</option>
+                        <option value="transferencia" ${f.metodoPago === 'transferencia' ? 'selected' : ''}>🏦 Transferencia</option>
+                      </select>
+                    ` : `
+                      <span style="font-size:12px; color:var(--ink-400); text-align:center; display:block;">—</span>
+                    `}
+                  </td>
+
+                  <!-- Eliminar fila -->
+                  <td style="text-align:center; padding:6px 4px;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="_masivoEliminarFila(${i})" title="Quitar fila" style="color:#ef4444; padding:3px 6px; font-weight:bold;">
                       ✕
                     </button>
                   </td>
@@ -2800,7 +2865,7 @@ Carlos Ruiz	3129876543	79123456	1"></textarea>
       </div>
 
       <!-- Resumen en vivo -->
-      <div style="margin-top:14px; padding:10px 14px; background:var(--line-soft); border-radius:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <div style="margin-top:12px; padding:10px 14px; background:var(--line-soft); border-radius:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <div style="display:flex; gap:14px; font-size:13px; align-items:center; flex-wrap:wrap;">
           <span>👥 Participantes válidos: <strong>${filasValidas}</strong></span>
           <span>🎟️ Boletas a asignar: <strong>${totalBoletas}</strong></span>
@@ -2808,32 +2873,48 @@ Carlos Ruiz	3129876543	79123456	1"></textarea>
         </div>
         <div>
           ${cupoInsuficiente
-            ? '<span style="color:#ef4444; font-weight:600; font-size:12px;">⚠️ Las boletas superan los cupos libres</span>'
+            ? '<span style="color:#ef4444; font-weight:600; font-size:12px;">⚠️ Las boletas solicitadas superan los cupos libres</span>'
             : hayErrores
-              ? '<span style="color:#ef4444; font-weight:600; font-size:12px;">⚠️ Hay números específicos ya ocupados</span>'
-              : '<span style="color:#15803d; font-weight:600; font-size:12px;">✅ Listo para registrar</span>'
+              ? '<span style="color:#ef4444; font-weight:600; font-size:12px;">⚠️ Hay números específicos ya ocupados o con error</span>'
+              : '<span style="color:#15803d; font-weight:600; font-size:12px;">✅ Todo listo para registrar</span>'
           }
         </div>
       </div>
     </div>
 
-    <div class="modal__footer" style="padding:14px 20px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center;">
-      <button class="btn btn-ghost" onclick="state._registroMasivo=null; cerrarModal();">Cancelar</button>
-      <button class="btn btn-gold" onclick="_masivoGuardar()"
+    <div class="modal__footer" style="padding:12px 18px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center;">
+      <button type="button" class="btn btn-ghost" onclick="state._registroMasivo=null; cerrarModal();">
+        Cancelar
+      </button>
+      <button type="button" class="btn btn-gold" onclick="_masivoGuardar()"
         ${filasValidas === 0 || hayErrores || cupoInsuficiente ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
-        💾 Registrar ${filasValidas} persona${filasValidas !== 1 ? 's' : ''} (${totalBoletas} boleta${totalBoletas !== 1 ? 's' : ''})
+        💾 Registrar ${filasValidas} participante${filasValidas !== 1 ? 's' : ''} (${totalBoletas} boleta${totalBoletas !== 1 ? 's' : ''})
       </button>
     </div>
   `;
 
-  abrirModal(html, { maxWidth: '940px' });
+  abrirModal(html, { maxWidth: '980px' });
 }
 
 function _masivoAgregarFila() {
   const m = state._registroMasivo;
   if (!m) return;
-  m.filas.push({ id: Date.now() + Math.random(), nombre: '', telefono: '', cedula: '', asignacion: '1' });
+  m.filas.push({
+    id: Date.now() + Math.random(),
+    nombre: '',
+    telefono: '',
+    cedula: '',
+    modo: 'azar',
+    cantidad: 1,
+    numerosTexto: '',
+    estadoPago: 'pendiente',
+    metodoPago: 'efectivo'
+  });
   _renderModalRegistroMasivo();
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#modal-root input[placeholder="Ej: Juan Pérez"]');
+    if (inputs.length > 0) inputs[inputs.length - 1].focus();
+  }, 50);
 }
 
 function _masivoEliminarFila(index) {
@@ -2841,7 +2922,7 @@ function _masivoEliminarFila(index) {
   if (!m) return;
   m.filas.splice(index, 1);
   if (m.filas.length === 0) {
-    m.filas.push({ id: 1, nombre: '', telefono: '', cedula: '', asignacion: '1' });
+    m.filas.push({ id: 1, nombre: '', telefono: '', cedula: '', modo: 'azar', cantidad: 1, numerosTexto: '', estadoPago: 'pendiente', metodoPago: 'efectivo' });
   }
   _renderModalRegistroMasivo();
 }
@@ -2850,11 +2931,49 @@ function _masivoLimpiarFilas() {
   const m = state._registroMasivo;
   if (!m) return;
   m.filas = [
-    { id: 1, nombre: '', telefono: '', cedula: '', asignacion: '1' },
-    { id: 2, nombre: '', telefono: '', cedula: '', asignacion: '1' },
-    { id: 3, nombre: '', telefono: '', cedula: '', asignacion: '1' }
+    { id: 1, nombre: '', telefono: '', cedula: '', modo: 'azar', cantidad: 1, numerosTexto: '', estadoPago: 'pendiente', metodoPago: 'efectivo' }
   ];
   _renderModalRegistroMasivo();
+}
+
+function _masivoCambiarModoFila(index, modo) {
+  const m = state._registroMasivo;
+  if (!m || !m.filas[index]) return;
+  m.filas[index].modo = modo;
+  _renderModalRegistroMasivo();
+}
+
+function _masivoCambiarPagoFila(index, estado) {
+  const m = state._registroMasivo;
+  if (!m || !m.filas[index]) return;
+  m.filas[index].estadoPago = estado;
+  _renderModalRegistroMasivo();
+}
+
+function _masivoCambiarMetodoFila(index, metodo) {
+  const m = state._registroMasivo;
+  if (!m || !m.filas[index]) return;
+  m.filas[index].metodoPago = metodo;
+}
+
+function _masivoAplicarModoATodos(modo) {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.filas.forEach(f => { f.modo = modo; });
+  _renderModalRegistroMasivo();
+  toast('Modo "' + (modo === 'azar' ? 'Al azar' : 'Específico') + '" aplicado a todas las filas', 'info');
+}
+
+function _masivoAplicarPagoATodos(estadoPago, metodoPago = 'efectivo') {
+  const m = state._registroMasivo;
+  if (!m) return;
+  m.filas.forEach(f => {
+    f.estadoPago = estadoPago;
+    f.metodoPago = metodoPago;
+  });
+  _renderModalRegistroMasivo();
+  const label = estadoPago === 'pendiente' ? 'Pendientes' : ('Pagadas (' + (metodoPago === 'transferencia' ? 'Transferencia' : 'Efectivo') + ')');
+  toast('Todas las filas marcadas como ' + label, 'info');
 }
 
 function _masivoUpdateFila(index, field, value) {
@@ -2863,31 +2982,40 @@ function _masivoUpdateFila(index, field, value) {
   m.filas[index][field] = value;
   m.filas[index]._tocado = true;
 
-  // Actualizar solo etiquetas y resumen sin perder el foco del input
-  const parse = _masivoParseAsignacion(m.filas[index].asignacion, m.setLibres);
-  m.filas[index]._parse = parse;
+  // Actualizar validación de la fila sin destruir el foco del teclado
+  if (m.filas[index].modo === 'especifico') {
+    m.filas[index]._parse = _masivoParseNumerosEspecificos(m.filas[index].numerosTexto, m.setLibres);
+  } else {
+    const c = Math.max(1, parseInt(m.filas[index].cantidad, 10) || 1);
+    m.filas[index]._parse = { valido: true, cantidad: c, numeros: [], ocupados: [], label: '🎲 ' + c + ' boleta(s) al azar' };
+  }
 
   const tr = document.getElementById(`masivo-fila-${index}`);
   if (tr) {
-    const badgeDiv = tr.querySelector('td:nth-child(5) div');
+    const badgeDiv = tr.querySelector('td:nth-child(6) div');
     if (badgeDiv) {
       const tieneNombre = m.filas[index].nombre && m.filas[index].nombre.trim();
-      const badgeCls = !tieneNombre ? 'color:var(--ink-400);' : parse.valido ? 'color:#15803d; font-weight:600;' : 'color:#b91c1c; font-weight:700;';
-      badgeDiv.style.cssText = `font-size:11px; margin-top:3px; ${badgeCls}`;
-      badgeDiv.innerHTML = parse.valido ? parse.label : `❌ Número(s) ocupado(s): ${parse.ocupados.join(', ')}`;
+      const parse = m.filas[index]._parse;
+      const badgeCls = !tieneNombre
+        ? 'color:var(--ink-400);'
+        : parse.valido
+          ? (m.filas[index].modo === 'especifico' ? 'color:#2563eb; font-weight:600;' : 'color:#15803d; font-weight:600;')
+          : 'color:#b91c1c; font-weight:700;';
+      badgeDiv.style.cssText = 'font-size:11px; margin-top:2px; ' + badgeCls;
+      badgeDiv.innerHTML = parse.label;
     }
   }
 
-  // Recalcular totales
+  // Recalcular balance
   let totalBoletas = 0;
   let hayErrores = false;
   let filasValidas = 0;
   m.filas.forEach(f => {
-    const p = f._parse || _masivoParseAsignacion(f.asignacion, m.setLibres);
     if (f.nombre && f.nombre.trim()) {
       filasValidas++;
-      totalBoletas += p.cantidad;
-      if (!p.valido) hayErrores = true;
+      const cant = f.modo === 'especifico' ? (f._parse.numeros.length || 0) : f._parse.cantidad;
+      totalBoletas += cant;
+      if (!f._parse.valido) hayErrores = true;
     }
   });
 
@@ -2897,7 +3025,7 @@ function _masivoUpdateFila(index, field, value) {
     btnGuardar.disabled = deshabilitado;
     btnGuardar.style.opacity = deshabilitado ? '0.5' : '1';
     btnGuardar.style.cursor = deshabilitado ? 'not-allowed' : 'pointer';
-    btnGuardar.innerHTML = `💾 Registrar ${filasValidas} persona${filasValidas !== 1 ? 's' : ''} (${totalBoletas} boleta${totalBoletas !== 1 ? 's' : ''})`;
+    btnGuardar.innerHTML = '💾 Registrar ' + filasValidas + ' participante' + (filasValidas !== 1 ? 's' : '') + ' (' + totalBoletas + ' boleta' + (totalBoletas !== 1 ? 's' : '') + ')';
   }
 }
 
@@ -2906,56 +3034,6 @@ function _masivoTogglePegar() {
   if (!m) return;
   m.mostrarPegar = !m.mostrarPegar;
   _renderModalRegistroMasivo();
-}
-
-function _masivoCambiarPago(estado) {
-  const m = state._registroMasivo;
-  if (!m) return;
-  m.estadoPago = estado;
-  _renderModalRegistroMasivo();
-}
-
-function _masivoCambiarMetodo(metodo) {
-  const m = state._registroMasivo;
-  if (!m) return;
-  m.metodoPago = metodo;
-}
-
-function _masivoParsearLinea(linea) {
-  if (!linea || !linea.trim()) return null;
-  const sep = linea.includes('\t') ? '\t' : /[,;]|(?:\s-\s)/;
-  const partes = linea.split(sep).map(p => p.trim()).filter(Boolean);
-  if (partes.length === 0) return null;
-
-  const nombre = partes[0];
-  const resto = partes.slice(1);
-  let telefono = '';
-  let cedula = '';
-  let asignacion = '1';
-
-  const noAsignados = [];
-  for (let i = 0; i < resto.length; i++) {
-    const p = resto[i];
-    const soloDigitos = p.replace(/\D/g, '');
-    if (!telefono && (/^(?:\+?57)?3\d{9}$/.test(soloDigitos) || (soloDigitos.length === 10 && soloDigitos.startsWith('3')))) {
-      telefono = soloDigitos;
-    } else {
-      noAsignados.push(p);
-    }
-  }
-
-  if (noAsignados.length >= 2) {
-    const primerPosibleCedula = noAsignados[0].replace(/\D/g, '');
-    if (primerPosibleCedula.length >= 6 && primerPosibleCedula.length <= 11) {
-      cedula = primerPosibleCedula;
-      noAsignados.shift();
-    }
-  }
-
-  const textoAsig = noAsignados.join(', ').trim();
-  if (textoAsig) asignacion = textoAsig;
-
-  return { nombre, telefono, cedula, asignacion };
 }
 
 function _masivoProcesarTextoPegado() {
@@ -2969,22 +3047,91 @@ function _masivoProcesarTextoPegado() {
   const nuevasFilas = [];
 
   for (const linea of lineas) {
-    const p = _masivoParsearLinea(linea);
-    if (p && p.nombre) {
-      nuevasFilas.push({
-        id: Date.now() + Math.random(),
-        nombre: p.nombre,
-        telefono: p.telefono,
-        cedula: p.cedula,
-        asignacion: p.asignacion
-      });
+    const sep = linea.includes('\t') ? '\t' : /[,;]|(?:\s-\s)/;
+    const partes = linea.split(sep).map(p => p.trim()).filter(Boolean);
+    if (partes.length === 0) continue;
+
+    const nombre = partes[0];
+    const resto = partes.slice(1);
+    let telefono = '';
+    let cedula = '';
+    let numeros = [];
+    let cantidad = 1;
+    let modo = 'azar';
+    let estadoPago = 'pendiente';
+    let metodoPago = 'efectivo';
+
+    const noAsignados = [];
+    for (const p of resto) {
+      const pLower = p.toLowerCase();
+      if (/^(?:pagad[oa]|cancelad[oa]|al\s*dia|pago)$/i.test(pLower)) {
+        estadoPago = 'pagado';
+        continue;
+      }
+      if (/^(?:pendiente|debe|sin\s*pagar)$/i.test(pLower)) {
+        estadoPago = 'pendiente';
+        continue;
+      }
+      if (/^(?:transferencia|transf|banco|nequi|daviplata)$/i.test(pLower)) {
+        estadoPago = 'pagado';
+        metodoPago = 'transferencia';
+        continue;
+      }
+      if (/^(?:efectivo|cash)$/i.test(pLower)) {
+        estadoPago = 'pagado';
+        metodoPago = 'efectivo';
+        continue;
+      }
+
+      const soloDigitos = p.replace(/\D/g, '');
+      if (!telefono && (/^(?:\+?57)?3\d{9}$/.test(soloDigitos) || (soloDigitos.length === 10 && soloDigitos.startsWith('3')))) {
+        telefono = soloDigitos;
+      } else {
+        noAsignados.push(p);
+      }
     }
+
+    if (noAsignados.length >= 2) {
+      const primerPosibleCedula = noAsignados[0].replace(/\D/g, '');
+      if (primerPosibleCedula.length >= 6 && primerPosibleCedula.length <= 11) {
+        cedula = primerPosibleCedula;
+        noAsignados.shift();
+      }
+    }
+
+    const textoAsig = noAsignados.join(' ').trim();
+    let numerosTexto = '';
+    if (textoAsig) {
+      const matchCant = textoAsig.match(/^(?:x\s*|cant\s*:?\s*)?(\d+)(?:\s*(?:boletas?|nums?|números?))?$/i);
+      if (matchCant && Number(matchCant[1]) <= 100 && !textoAsig.startsWith('0') && !textoAsig.includes('#') && !textoAsig.includes(',')) {
+        cantidad = Math.max(1, Number(matchCant[1]));
+        modo = 'azar';
+      } else {
+        const matchNums = textoAsig.match(/\b\d+\b/g);
+        if (matchNums && matchNums.length > 0) {
+          modo = 'especifico';
+          numerosTexto = matchNums.join(', ');
+        }
+      }
+    }
+
+    nuevasFilas.push({
+      id: Date.now() + Math.random(),
+      nombre,
+      telefono,
+      cedula,
+      modo,
+      cantidad,
+      numerosTexto,
+      estadoPago,
+      metodoPago
+    });
   }
 
   if (nuevasFilas.length > 0) {
     m.filas = nuevasFilas;
     m.mostrarPegar = false;
-    toast(`✅ Se cargaron ${nuevasFilas.length} participantes a la tabla`);
+    toast('✅ Se cargaron ' + nuevasFilas.length + ' participantes a la tabla');
     _renderModalRegistroMasivo();
   } else {
     toast('No se encontraron líneas válidas', 'error');
@@ -2996,60 +3143,72 @@ async function _masivoGuardar() {
   if (!m) return;
 
   const validas = m.filas.filter(f => f.nombre && f.nombre.trim());
-  if (validas.length === 0) return toast('Ingresa al menos un participante', 'error');
+  if (validas.length === 0) return toast('Ingresa al menos un participante con nombre', 'error');
 
-  const payloadFilas = validas.map(f => {
-    const p = f._parse || _masivoParseAsignacion(f.asignacion, m.setLibres);
-    return {
-      nombre: f.nombre.trim(),
-      telefono: (f.telefono || '').trim(),
-      cedula: (f.cedula || '').trim(),
-      modo: p.modo,
-      cantidad: p.cantidad,
-      numeros: p.numeros
-    };
-  });
-
-  const body = {
-    filas: payloadFilas,
-    estado_pago: m.estadoPago,
-    metodo_pago: m.estadoPago === 'pagado' ? m.metodoPago : null,
-    observacion: m.observacion || null
-  };
+  const payloadFilas = [];
+  for (const f of validas) {
+    if (f.modo === 'especifico') {
+      const parse = _masivoParseNumerosEspecificos(f.numerosTexto, m.setLibres);
+      if (!parse.valido) {
+        return toast('Corrige los números de ' + f.nombre + ': ' + parse.label, 'error');
+      }
+      payloadFilas.push({
+        nombre: f.nombre.trim(),
+        telefono: (f.telefono || '').trim(),
+        cedula: (f.cedula || '').trim(),
+        modo: 'especifico',
+        cantidad: parse.numeros.length,
+        numeros: parse.numeros,
+        estado_pago: f.estadoPago,
+        metodo_pago: f.estadoPago === 'pagado' ? f.metodoPago : null
+      });
+    } else {
+      const cant = Math.max(1, parseInt(f.cantidad, 10) || 1);
+      payloadFilas.push({
+        nombre: f.nombre.trim(),
+        telefono: (f.telefono || '').trim(),
+        cedula: (f.cedula || '').trim(),
+        modo: 'azar',
+        cantidad: cant,
+        numeros: [],
+        estado_pago: f.estadoPago,
+        metodo_pago: f.estadoPago === 'pagado' ? f.metodoPago : null
+      });
+    }
+  }
 
   try {
     abrirModal(`
       <div class="modal__header"><h3>Guardando participantes...</h3></div>
-      <div class="modal__body"><div class="empty-state"><div class="icon">⏳</div><p>Asignando boletas y asegurando la base de datos...</p></div></div>
+      <div class="modal__body"><div class="empty-state"><div class="icon">⏳</div><p>Asignando boletas y guardando en la base de datos...</p></div></div>
     `);
 
     const r = await api('/rifas/' + m.rifaId + '/participantes/masivo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ filas: payloadFilas })
     });
 
     state._registroMasivo = null;
 
-    // Reporte de resultados
     const insertados = r.insertados || [];
     const totalBoletas = insertados.reduce((sum, it) => sum + (it.cantidad || 1), 0);
     const errores = r.errores || [];
     const sinCupo = r.sinCupo || [];
 
     const resumenHtml = `
-      <div class="modal__header">
-        <h3 style="margin:0; font-size:17px; color:#15803d;">🎉 ¡Registro Masivo Completado!</h3>
+      <div class="modal__header" style="padding:16px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:17px; color:#15803d; font-weight:700;">🎉 ¡Registro Masivo Completado!</h3>
         <button class="btn btn-ghost btn-sm" onclick="cerrarModal(); vistaDetalleRifa(${m.rifaId}, 'participantes');">✕</button>
       </div>
-      <div class="modal__body" style="max-height:75vh; overflow-y:auto;">
+      <div class="modal__body" style="padding:16px 20px; max-height:75vh; overflow-y:auto;">
         <p style="margin:0 0 12px; font-size:14px;">
-          Se registraron <strong>${insertados.length} personas</strong> con un total de <strong>${totalBoletas} boletas</strong> en estado <em>${m.estadoPago}</em>.
+          Se registraron <strong>${insertados.length} participantes</strong> con un total de <strong>${totalBoletas} boleta(s)</strong> exitosamente.
         </p>
 
         ${errores.length ? `
           <div style="background:rgba(239,68,68,0.1); border:1px solid #ef4444; border-radius:8px; padding:10px; margin-bottom:12px; font-size:12px;">
-            <strong style="color:#ef4444;">⚠️ ${errores.length} fila(s) con error:</strong>
+            <strong style="color:#ef4444;">⚠️ ${errores.length} participante(s) con error:</strong>
             <ul style="margin:4px 0 0; padding-left:16px;">
               ${errores.map(e => `<li>${escapeHtml(e.nombre)}: ${escapeHtml(e.motivo)}</li>`).join('')}
             </ul>
@@ -3066,12 +3225,12 @@ async function _masivoGuardar() {
         ` : ''}
 
         <div style="border:1px solid var(--line); border-radius:10px; overflow:hidden;">
-          <table class="tbl" style="margin:0; font-size:12px;">
+          <table class="tbl" style="margin:0; font-size:12px; width:100%;">
             <thead style="background:var(--line-soft);">
               <tr>
                 <th>Persona</th>
                 <th>Teléfono</th>
-                <th>Cantidad</th>
+                <th>Estado Pago</th>
                 <th>Números Asignados</th>
               </tr>
             </thead>
@@ -3080,7 +3239,11 @@ async function _masivoGuardar() {
                 <tr>
                   <td><strong>${escapeHtml(it.nombre)}</strong></td>
                   <td>${escapeHtml(it.telefono || '—')}</td>
-                  <td>${it.cantidad || 1}</td>
+                  <td>
+                    <span style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px; ${it.estado_pago === 'pagado' ? 'background:rgba(21,128,61,0.15); color:#15803d;' : 'background:rgba(217,119,6,0.15); color:#d97706;'}">
+                      ${it.estado_pago === 'pagado' ? ('✅ Pagado (' + (it.metodo_pago === 'transferencia' ? '🏦 Transferencia' : '💵 Efectivo') + ')') : '⏳ Pendiente'}
+                    </span>
+                  </td>
                   <td>
                     <div style="display:flex; flex-wrap:wrap; gap:4px;">
                       ${(it.numeros || []).map(num => `<span style="background:rgba(212,160,23,0.15); border:1px solid var(--gold-500); padding:1px 6px; border-radius:4px; font-weight:600; font-size:11px; color:var(--gold-700);">${escapeHtml(num)}</span>`).join('')}
@@ -3092,7 +3255,7 @@ async function _masivoGuardar() {
           </table>
         </div>
       </div>
-      <div class="modal__footer">
+      <div class="modal__footer" style="padding:12px 18px; border-top:1px solid var(--line); display:flex; justify-content:flex-end;">
         <button class="btn btn-primary" onclick="cerrarModal(); vistaDetalleRifa(${m.rifaId}, 'participantes');">
           Ver Participantes
         </button>
