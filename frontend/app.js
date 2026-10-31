@@ -2660,22 +2660,45 @@ function _renderModalRegistroMasivo() {
   const m = state._registroMasivo;
   if (!m) return;
 
-  // Cálculos de totales y validación
-  let totalBoletas = 0;
-  let hayErrores = false;
-  let filasValidas = 0;
-
+  // 1. Detección de colisiones internas (duplicados dentro de esta misma tanda)
+  const mapaUsoNumeros = new Map();
   m.filas.forEach((f, i) => {
     if (f.modo === 'especifico') {
       f._parse = _masivoParseNumerosEspecificos(f.numerosTexto, m.setLibres);
+      if (f._parse.valido && f._parse.numeros.length > 0) {
+        for (const n of f._parse.numeros) {
+          if (!mapaUsoNumeros.has(n)) mapaUsoNumeros.set(n, []);
+          mapaUsoNumeros.get(n).push(i + 1);
+        }
+      }
     } else {
       const c = Math.max(1, parseInt(f.cantidad, 10) || 1);
       f._parse = { valido: true, cantidad: c, numeros: [], ocupados: [], label: '🎲 ' + c + ' boleta(s) al azar' };
     }
+  });
 
+  // 2. Marcar avisos si algún número se repite entre filas del lote
+  let hayDuplicadosInternos = false;
+  m.filas.forEach((f, i) => {
+    if (f.modo === 'especifico' && f._parse.valido && f._parse.numeros.length > 0) {
+      const repetidos = f._parse.numeros.filter(n => mapaUsoNumeros.get(n) && mapaUsoNumeros.get(n).length > 1);
+      if (repetidos.length > 0) {
+        f._parse.valido = false;
+        hayDuplicadosInternos = true;
+        f._parse.label = '❌ Número ' + repetidos.join(', ') + ' duplicado en filas: ' + repetidos.map(n => mapaUsoNumeros.get(n).join(', ')).join('; ');
+      }
+    }
+  });
+
+  // 3. Cálculos de totales y validación global
+  let totalBoletas = 0;
+  let hayErrores = false;
+  let filasValidas = 0;
+
+  m.filas.forEach(f => {
     if (f.nombre && f.nombre.trim()) {
       filasValidas++;
-      const cant = f.modo === 'especifico' ? (f._parse.numeros.length || 0) : f._parse.cantidad;
+      const cant = f.modo === 'especifico' ? (f._parse.numeros ? f._parse.numeros.length : 0) : f._parse.cantidad;
       totalBoletas += cant;
       if (!f._parse.valido) hayErrores = true;
     }
@@ -2748,8 +2771,14 @@ Carlos Ruiz	3129876543	79123456	1	pendiente"></textarea>
         </div>
       ` : ''}
 
-      <!-- Tabla interactiva tipo Excel -->
-      <div style="overflow-x:auto; border:1px solid var(--line); border-radius:12px;">
+      <!-- Indicador responsive para pantallas móviles -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:11px; color:var(--ink-600); flex-wrap:wrap; gap:4px;">
+        <span>📱 <em>Desliza la tabla horizontalmente para ver cédula, pago y medio</em></span>
+        <span><strong>${m.filas.length}</strong> fila(s)</span>
+      </div>
+
+      <!-- Tabla interactiva tipo Excel con scroll horizontal táctil -->
+      <div style="overflow-x:auto; border:1px solid var(--line); border-radius:12px; -webkit-overflow-scrolling:touch;">
         <table class="tbl" style="margin:0; width:100%; border-collapse:collapse; min-width:880px;">
           <thead style="background:var(--line-soft);">
             <tr>
@@ -2982,29 +3011,48 @@ function _masivoUpdateFila(index, field, value) {
   m.filas[index][field] = value;
   m.filas[index]._tocado = true;
 
-  // Actualizar validación de la fila sin destruir el foco del teclado
-  if (m.filas[index].modo === 'especifico') {
-    m.filas[index]._parse = _masivoParseNumerosEspecificos(m.filas[index].numerosTexto, m.setLibres);
-  } else {
-    const c = Math.max(1, parseInt(m.filas[index].cantidad, 10) || 1);
-    m.filas[index]._parse = { valido: true, cantidad: c, numeros: [], ocupados: [], label: '🎲 ' + c + ' boleta(s) al azar' };
-  }
-
-  const tr = document.getElementById(`masivo-fila-${index}`);
-  if (tr) {
-    const badgeDiv = tr.querySelector('td:nth-child(6) div');
-    if (badgeDiv) {
-      const tieneNombre = m.filas[index].nombre && m.filas[index].nombre.trim();
-      const parse = m.filas[index]._parse;
-      const badgeCls = !tieneNombre
-        ? 'color:var(--ink-400);'
-        : parse.valido
-          ? (m.filas[index].modo === 'especifico' ? 'color:#2563eb; font-weight:600;' : 'color:#15803d; font-weight:600;')
-          : 'color:#b91c1c; font-weight:700;';
-      badgeDiv.style.cssText = 'font-size:11px; margin-top:2px; ' + badgeCls;
-      badgeDiv.innerHTML = parse.label;
+  // 1. Parsear todas las filas específicas para detectar duplicados cruzados en tiempo real
+  const mapaUso = new Map();
+  m.filas.forEach((f, i) => {
+    if (f.modo === 'especifico') {
+      f._parse = _masivoParseNumerosEspecificos(f.numerosTexto, m.setLibres);
+      if (f._parse.valido && f._parse.numeros.length > 0) {
+        for (const n of f._parse.numeros) {
+          if (!mapaUso.has(n)) mapaUso.set(n, []);
+          mapaUso.get(n).push(i + 1);
+        }
+      }
+    } else {
+      const c = Math.max(1, parseInt(f.cantidad, 10) || 1);
+      f._parse = { valido: true, cantidad: c, numeros: [], ocupados: [], label: '🎲 ' + c + ' boleta(s) al azar' };
     }
-  }
+  });
+
+  // 2. Actualizar etiquetas de cada fila en el DOM sin perder foco de escritura
+  m.filas.forEach((f, i) => {
+    if (f.modo === 'especifico' && f._parse.valido && f._parse.numeros.length > 0) {
+      const rep = f._parse.numeros.filter(n => mapaUso.get(n) && mapaUso.get(n).length > 1);
+      if (rep.length > 0) {
+        f._parse.valido = false;
+        f._parse.label = '❌ Repetido: ' + rep.map(n => '#' + n + ' (filas ' + mapaUso.get(n).join(', ') + ')').join('; ');
+      }
+    }
+    const tr = document.getElementById('masivo-fila-' + i);
+    if (tr) {
+      const badgeDiv = tr.querySelector('td:nth-child(6) div');
+      if (badgeDiv) {
+        const tieneNombre = f.nombre && f.nombre.trim();
+        const parse = f._parse;
+        const badgeCls = !tieneNombre
+          ? 'color:var(--ink-400);'
+          : parse.valido
+            ? (f.modo === 'especifico' ? 'color:#2563eb; font-weight:600;' : 'color:#15803d; font-weight:600;')
+            : 'color:#b91c1c; font-weight:700;';
+        badgeDiv.style.cssText = 'font-size:11px; margin-top:2px; ' + badgeCls;
+        badgeDiv.innerHTML = parse.label;
+      }
+    }
+  });
 
   // Recalcular balance
   let totalBoletas = 0;
