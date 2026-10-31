@@ -24,6 +24,98 @@ try {
 }
 const dbPath = path.join(dirDatos, 'rifas.db');
 
+// ---- Blindaje de la base ----------------------------------------------------
+// El error "database disk image is malformed" ocurre cuando el proceso muere
+// justo mientras se reescribe el archivo (deploy/reinicio/OOM) y queda
+// truncado. Para evitarlo: escritura atómica (tmp + fsync + rename), respaldos
+// rotativos y verificación de integridad al arrancar con recuperación
+// automática del último respaldo válido.
+const MAGIC_SQLITE = Buffer.from('SQLite format 3\0', 'latin1');
+const MAX_RESPALDOS = 3;
+const INTERVALO_RESPALDO_MS = 60 * 1000;
+
+let ultimoRespaldo = 0;
+let datosRecuperacion = null;
+
+function estadoRecuperacion() { return datosRecuperacion; }
+
+function firmaSqliteValida(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.length >= 100 && buffer.subarray(0, 16).equals(MAGIC_SQLITE);
+}
+
+// Verifica con PRAGMA integrity_check sobre una copia en memoria (no toca disco)
+function integridadOk(SQL, buffer) {
+  if (!firmaSqliteValida(buffer)) return false;
+  let prueba = null;
+  try {
+    prueba = new SQL.Database(buffer);
+    const resultado = prueba.exec('PRAGMA integrity_check');
+    const valor = resultado?.[0]?.values?.[0]?.[0];
+    return String(valor ?? '').toLowerCase() === 'ok';
+  } catch (e) {
+    return false;
+  } finally {
+    try { if (prueba) prueba.close(); } catch (e) {}
+  }
+}
+
+function marcaTiempo() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+// Rota rifas.db.bak-1..3 y guarda el estado bueno anterior antes de pisarlo.
+function rotarRespaldos(ruta) {
+  try {
+    for (let n = MAX_RESPALDOS - 1; n >= 1; n--) {
+      const origen = `${ruta}.bak-${n}`;
+      const destino = `${ruta}.bak-${n + 1}`;
+      if (fs.existsSync(origen)) {
+        try { fs.rmSync(destino, { force: true }); } catch (e) {}
+        fs.renameSync(origen, destino);
+      }
+    }
+    fs.copyFileSync(ruta, `${ruta}.bak-1`);
+  } catch (e) {
+    console.warn('[DB] No se pudo rotar respaldos:', e.message);
+  }
+}
+
+// Base dañada: se aísla (nunca se borra) y se intenta recuperar del respaldo
+// más reciente que pase la verificación de integridad.
+function recuperarBaseDanada(SQL, ruta) {
+  const corrupto = `${ruta}.corrupt-${marcaTiempo()}`;
+  try {
+    fs.renameSync(ruta, corrupto);
+    console.error(`[DB] ⚠️ Base de datos dañada detectada. Copia aislada en: ${corrupto}`);
+  } catch (e) {
+    console.error('[DB] ⚠️ Base dañada y no se pudo mover:', e.message);
+    try { fs.copyFileSync(ruta, corrupto); } catch (e2) {}
+  }
+
+  for (let n = 1; n <= MAX_RESPALDOS; n++) {
+    const respaldo = `${ruta}.bak-${n}`;
+    if (!fs.existsSync(respaldo)) continue;
+    try {
+      const buffer = fs.readFileSync(respaldo);
+      if (!integridadOk(SQL, buffer)) {
+        console.warn(`[DB] Respaldo dañado, se ignora: ${respaldo}`);
+        continue;
+      }
+      fs.mkdirSync(path.dirname(ruta), { recursive: true });
+      fs.copyFileSync(respaldo, ruta);
+      datosRecuperacion = { archivoCorrupto: corrupto, origen: respaldo, fecha: new Date().toISOString() };
+      console.warn(`[DB] ✅ Base recuperada desde ${respaldo}`);
+      return buffer;
+    } catch (e) {
+      console.warn(`[DB] Error leyendo respaldo ${respaldo}:`, e.message);
+    }
+  }
+
+  datosRecuperacion = { archivoCorrupto: corrupto, origen: 'nueva', fecha: new Date().toISOString() };
+  console.error('[DB] ❌ No hay respaldos válidos: se inicia una base nueva vacía.');
+  return null;
+}
+
 // Notificación de "hubo escrituras" para que el servidor pueda sincronizar
 // los cambios al almacenamiento persistente (Vercel Blob) antes de responder.
 let notificadorEscritura = null;
@@ -40,6 +132,10 @@ class SqlJsWrapper {
     this._db = sqlJsDb;
     this._path = persistencePath;
     this._inTransaction = false;
+    // Firma binaria de la última escritura real: las sentencias que no cambian
+    // nada (CREATE TABLE IF NOT EXISTS, PRAGMAs, DELETE de 0 filas…) no deben
+    // disparar sincronización ni reescrituras innecesarias.
+    this._firma = null;
   }
 
   // Ejecuta SQL sin retorno de resultados (DDL, DML multi-statement)
@@ -88,15 +184,39 @@ class SqlJsWrapper {
     };
   }
 
-  // Persistir a disco
+  // Persistir a disco de forma ATÓMICA (tmp + fsync + rename) para que un
+  // apagado a mitad de escritura no deje el archivo truncado.
   _save() {
-    notificarEscritura();
+    let buffer;
     try {
-      const data = this._db.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(this._path, buffer);
+      buffer = Buffer.from(this._db.export());
     } catch (e) {
-      console.error('[DB] Error guardando:', e.message);
+      console.error('[DB] Error exportando la base:', e.message);
+      return;
+    }
+    if (this._firma && this._firma.equals(buffer)) return; // sin cambios reales
+    this._firma = buffer;
+    notificarEscritura();
+
+    const tmp = `${this._path}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      fs.mkdirSync(path.dirname(this._path), { recursive: true });
+      const fd = fs.openSync(tmp, 'w');
+      try {
+        fs.writeFileSync(fd, buffer);
+        try { fs.fsyncSync(fd); } catch (e) { /* fsync no soportado */ }
+      } finally {
+        fs.closeSync(fd);
+      }
+      // Guarda el estado bueno anterior antes de reemplazarlo (máx. 1/minuto)
+      if (Date.now() - ultimoRespaldo > INTERVALO_RESPALDO_MS && fs.existsSync(this._path)) {
+        ultimoRespaldo = Date.now();
+        rotarRespaldos(this._path);
+      }
+      fs.renameSync(tmp, this._path); // reemplazo atómico
+    } catch (e) {
+      console.error('[DB] Error guardando (atómico):', e.message);
+      try { fs.rmSync(tmp, { force: true }); } catch (e2) {}
     }
   }
 
@@ -157,20 +277,49 @@ class StatementWrapper {
 
 // ---- Inicialización asincrónica (carga WASM) --------------------------------
 
-  async function initDB(sourcePath = dbPath, persistencePath = sourcePath) {
-  const SQL = await initSqlJs({
-    // En Vercel, node_modules no siempre incluye archivos WASM en el bundle.
-    // El recurso se versiona en assets para que la función serverless lo encuentre.
-    locateFile: (file) => path.join(__dirname, '..', 'assets', file),
-  });
-  let rawDb;
-  if (fs.existsSync(sourcePath)) {
-  const buffer = fs.readFileSync(sourcePath);
-    rawDb = new SQL.Database(buffer);
-  } else {
-    rawDb = new SQL.Database();
+let sqlJsPromesa = null;
+function cargarSqlJs() {
+  if (!sqlJsPromesa) {
+    sqlJsPromesa = initSqlJs({
+      // En Vercel, node_modules no siempre incluye archivos WASM en el bundle.
+      // El recurso se versiona en assets para que la función serverless lo encuentre.
+      locateFile: (file) => path.join(__dirname, '..', 'assets', file),
+    });
   }
+  return sqlJsPromesa;
+}
+
+// Permite validar un backup ANTES de restaurarlo (server.js).
+async function validarBufferDb(buffer) {
+  try {
+    const SQL = await cargarSqlJs();
+    return integridadOk(SQL, buffer);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function initDB(sourcePath = dbPath, persistencePath = sourcePath) {
+  const SQL = await cargarSqlJs();
+  let buffer = null;
+
+  if (fs.existsSync(sourcePath)) {
+    try {
+      buffer = fs.readFileSync(sourcePath);
+    } catch (e) {
+      console.error('[DB] No se pudo leer la base:', e.message);
+      buffer = null;
+    }
+    if (!buffer || !integridadOk(SQL, buffer)) {
+      // Archivo dañado: aislamiento + recuperación automática del respaldo.
+      buffer = recuperarBaseDanada(SQL, sourcePath);
+    }
+  }
+
+  const rawDb = buffer ? new SQL.Database(buffer) : new SQL.Database();
   const db = new SqlJsWrapper(rawDb, persistencePath);
+  // Firma inicial: PRAGMAs y ensureSchema no marcarán cambios si no alteran bytes.
+  db._firma = db.exportar();
   // Fase 2.1 — PRAGMAs de integridad/performance (best-effort en sql.js)
   try { db.exec('PRAGMA foreign_keys = ON'); } catch (e) {}
   try { db.exec('PRAGMA journal_mode = WAL'); } catch (e) {}
@@ -509,4 +658,4 @@ CREATE INDEX IF NOT EXISTS idx_referidos_codigo ON referidos(codigo);
 `);
 }
 
-module.exports = { initDB, ensureSchema, dbPath, dirDatos, alEscribir };
+module.exports = { initDB, ensureSchema, dbPath, dirDatos, alEscribir, validarBufferDb, estadoRecuperacion };

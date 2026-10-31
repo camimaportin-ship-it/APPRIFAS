@@ -15,8 +15,9 @@ const QRCode = require('qrcode');
 const XLSX = require('xlsx');
 const webPush = require('web-push');
 
-const { initDB, ensureSchema, dbPath, alEscribir } = require('./backend/db');
+const { initDB, ensureSchema, dbPath, alEscribir, validarBufferDb, estadoRecuperacion } = require('./backend/db');
 const persist = require('./backend/persistencia');
+const seguridad = require('./backend/seguridad');
 const whatsapp = require('./backend/whatsapp');
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const bcrypt = require('bcryptjs');
@@ -73,7 +74,17 @@ async function arrancarBase() {
 
 async function startApp() {
 await arrancarBase();
-ensureSchema(db);
+// Si el esquema falla (base irrecuperable aun tras la verificación), se aísla
+// el archivo y se arranca con una base nueva: la app nunca queda en crash loop.
+try {
+  ensureSchema(db);
+} catch (e) {
+  console.error('[DB] ⚠️ No se pudo inicializar el esquema:', e.message);
+  try { db.close(); } catch (e2) {}
+  try { fs.renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}`); } catch (e2) {}
+  db = await initDB(dbPath, dbPath);
+  ensureSchema(db);
+}
 
 // ----------------------- PUSH NOTIFICATIONS -----------------------------------
 // Generar VAPID keys una vez y persistirlas en tabla config
@@ -97,6 +108,12 @@ function enviarPush(titulo, cuerpo, data = {}) {
 const app = express();
 const PORT_BASE = env.PORT;
 
+// Ciberseguridad — Fase 4.0
+// Sin trust proxy, detrás de Railway/Vercel todas las IPs se ven iguales y los
+// rate limits bloquean a todos los usuarios a la vez (o a ninguno).
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
 // Seguridad: headers (HSTS, CSP, etc.) — Fase 1.1
 app.use(helmet({
   contentSecurityPolicy: false, // offline-first + inline styles del login lo requieren
@@ -111,13 +128,28 @@ app.use(cors({
   },
   credentials: true
 }));
-// Rate-limit global suave (300 req / 15 min por IP) — Fase 1.1
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false }));
-// Login rate-limit estricto (20 intentos / 15 min) — complementa bloqueo por usuario de server.js:73
+// Rate-limit global solo para /api: los archivos estáticos (imágenes, JS, CSS)
+// no deben consumir el cupo ni bloquear la app.
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => !req.path.startsWith('/api/'),
+  message: { error: 'Demasiadas peticiones. Espera unos minutos e inténtalo de nuevo.' }
+}));
+// Login rate-limit estricto (20 intentos / 15 min) — complementa bloqueo por usuario
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas peticiones de login. Intenta en 15 min.' } });
+// Captcha: cada petición inserta una fila temporal en la base
+const captchaLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas verificaciones. Intenta de nuevo en 15 min.' } });
+// Operaciones sensibles/pesadas: backup, restauración y subida de backups
+const operacionesLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas operaciones de backup/restauración. Intenta en 15 min.' } });
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Las respuestas de API nunca deben quedar en cachés compartidas ni proxies.
+app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 // Carpeta de imágenes subidas (producto y banner de empresa)
 let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
@@ -126,6 +158,10 @@ let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
   // En Vercel el espejo local de /tmp puede no tener la imagen: se baja de Blob
   // bajo demanda y se cachea. Fuera de Vercel funciona igual que siempre.
   app.use('/uploads', (req, res, next) => {
+    // Nunca servir uploads como HTML/SVG ejecutable
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
     let rel;
     try { rel = decodeURIComponent(req.path).replace(/^\/+/, ''); } catch (e) { return next(); }
     const abs = path.resolve(uploadsDir, rel);
@@ -143,8 +179,8 @@ let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
   });
 
 // Health — Fase 2
-app.get('/health', (req, res) => res.json({ ok: true, version: '2.2.0', uptime: process.uptime(), db: fs.existsSync(dbPath) ? 'ok' : 'missing' }));
-app.get('/api/health', (req, res) => res.json({ ok: true, version: '2.2.0', persistencia: persist.modo(), sincronizado: !persist.habilitado() || !dbSucio }));
+app.get('/health', (req, res) => res.json({ ok: true, version: '2.2.0', uptime: process.uptime(), db: fs.existsSync(dbPath) ? 'ok' : 'missing', dbRecuperada: !!estadoRecuperacion() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: '2.2.0', persistencia: persist.modo(), sincronizado: !persist.habilitado() || !dbSucio, dbRecuperada: !!estadoRecuperacion() }));
 
 // SEO — Fase 2.3
 app.get('/robots.txt', (req, res) => res.sendFile(path.join(__dirname, 'frontend', 'robots.txt')));
@@ -190,7 +226,19 @@ const sesionesActivas = new Map(); // token → { usuario, nombre, rol, exp } �
 
 // Tokens autocontenidos: Vercel puede atender cada petición en una instancia
 // distinta, por lo que una sesión no puede depender únicamente de SQLite o RAM.
-const AUTH_SECRET = process.env.AUTH_SECRET || process.env.ADMIN_SEED_PASS || 'rifassyc-auth-secret-change-me';
+// Secreto de firma de sesiones. Antes había un valor por defecto público en el
+// código: cualquiera podía firmar un token de super_admin. Ahora, si no está
+// configurado, se genera uno temporal por proceso.
+const AUTH_SECRET = (() => {
+  const configurado = process.env.AUTH_SECRET;
+  if (configurado && configurado.length >= 32) return configurado;
+  if (configurado) {
+    console.warn('[SEC] ⚠️ AUTH_SECRET es corto (<32 caracteres). Usa uno de al menos 32.');
+    return configurado;
+  }
+  console.warn('[SEC] ⚠️ AUTH_SECRET no está definido: se generó uno temporal. Las sesiones NO sobrevivirán a reinicios. Define AUTH_SECRET (32+ caracteres) en el entorno.');
+  return cryptoToken.randomBytes(32).toString('hex');
+})();
 function crearToken(data) {
   const payload = Buffer.from(JSON.stringify({
     usuario: data.usuario,
@@ -258,7 +306,9 @@ const BLOQUEO_MS = 15 * 60 * 1000; // 15 minutos
 // Login: POST /api/auth/login — con rate-limit estricto Fase 1.1
 app.post('/api/auth/login', loginLimiter, (req, res) => {
   try {
-    const { usuario, password, remember } = req.body;
+    const usuario = String(req.body?.usuario || '').trim().slice(0, 64);
+    const password = String(req.body?.password || '');
+    const remember = !!req.body?.remember;
     if (!usuario || !password) {
       return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
     }
@@ -268,8 +318,30 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
       const restante = Math.max(0, Math.ceil((lock.lockUntil - Date.now()) / 1000));
       return res.status(429).json({ error: `Demasiados intentos. Intenta de nuevo en ${restante}s`, bloqueo: true, retryAfter: restante });
     }
+    // Captcha del SERVIDOR obligatorio tras 2 fallos del mismo usuario (el captcha
+    // del navegador era solo visual y se podía saltar).
+    const fallosPrevios = Number(intentosFallidos.get(usuario)?.count || 0);
+    if (fallosPrevios >= 2) {
+      const captchaId = typeof req.body?.captchaId === 'string' ? req.body.captchaId.slice(0, 64) : '';
+      const respuesta = Number(req.body?.captchaRespuesta);
+      let captchaValido = false;
+      if (captchaId) {
+        try {
+          const fila = db.prepare('SELECT * FROM captcha_tokens WHERE id = ?').get(captchaId);
+          if (fila) {
+            captchaValido = Date.now() <= Number(fila.exp) && Number(fila.respuesta) === respuesta;
+            db.prepare('DELETE FROM captcha_tokens WHERE id = ?').run(captchaId);
+          }
+        } catch (e) { captchaValido = false; }
+      }
+      if (!captchaValido) {
+        return res.status(400).json({ error: 'Verificación de seguridad requerida. Resuelve el captcha e inténtalo de nuevo.', captchaRequerido: true });
+      }
+    }
     const user = db.prepare('SELECT * FROM usuarios WHERE usuario = ?').get(usuario);
     if (!user || !user.password_hash || !bcrypt.compareSync(password, user.password_hash)) {
+      // Evita crecimiento ilimitado del mapa con usuarios inventados (DoS de memoria)
+      if (intentosFallidos.size > 5000 && !intentosFallidos.has(usuario)) intentosFallidos.clear();
       const actual = intentosFallidos.get(usuario) || { count: 0 };
       actual.count += 1;
       if (actual.count >= MAX_INTENTOS) {
@@ -308,7 +380,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // CAPTCHA server-side — Fase 1.2: genera desafío y lo guarda 2 min
-app.get('/api/auth/captcha', (req, res) => {
+app.get('/api/auth/captcha', captchaLimiter, (req, res) => {
   const ops = ['+', '-', '×'];
   const op = ops[Math.floor(Math.random() * ops.length)];
   let a, b, respuesta;
@@ -691,7 +763,10 @@ function optimizeInBackground(file) {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.jpg';
+    // La extensión viene del usuario: se sanea y se limita a la lista blanca
+    // para que ningún nombre pueda escapar de uploads/ (../) ni ejecutarse.
+    const crudo = path.extname(seguridad.nombreArchivoSeguro(file.originalname)).toLowerCase();
+    const ext = /^\.(jpe?g|png|webp|gif)$/.test(crudo) ? crudo : '.jpg';
     const nombre = `${file.fieldname}-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
     uploadsPendientes.add(path.join(uploadsDir, nombre));
     cb(null, nombre);
@@ -701,8 +776,10 @@ const upload = multer({
   storage,
   limits: { fileSize: 8 * 1024 * 1024 }, // 8MB máx por imagen
   fileFilter: (req, file, cb) => {
-    if (/^image\//.test(file.mimetype)) cb(null, true);
-    else cb(new Error('Solo se permiten imágenes'));
+    if (seguridad.esImagenPermitida(file)) return cb(null, true);
+    const err = new Error('Solo se permiten imágenes JPG, PNG, WEBP o GIF');
+    err.status = 400;
+    cb(err);
   }
 });
 
@@ -711,8 +788,10 @@ const uploadDb = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (/\.(db|zip)$/i.test(file.originalname || '')) cb(null, true);
-    else cb(new Error('Solo se permiten archivos .db o .zip'));
+    if (/\.(db|zip)$/i.test(file.originalname || '')) return cb(null, true);
+    const err = new Error('Solo se permiten archivos .db o .zip');
+    err.status = 400;
+    cb(err);
   }
 });
 
@@ -1247,6 +1326,16 @@ app.get('/api/push/vapid-key', (req, res) => {
 // Webhook Wompi — Fase 3.1 — público, verifica firma si WOMPI_EVENTS_KEY está seteada
 app.post('/api/webhooks/wompi', express.json({ type: '*/*' }), (req, res) => {
   try {
+    // Seguridad: sin firma válida cualquiera podría marcar pagos como aprobados.
+    const secretoWompi = process.env.WOMPI_EVENTS_KEY;
+    if (secretoWompi) {
+      if (!seguridad.firmaWompiValida(req.body, secretoWompi)) {
+        console.warn('[WOMPI] Evento con firma inválida rechazado');
+        return res.status(401).json({ error: 'Firma del evento inválida' });
+      }
+    } else if (env.NODE_ENV === 'production') {
+      return res.status(503).json({ error: 'Webhook no configurado: define WOMPI_EVENTS_KEY para aceptar eventos.' });
+    }
     const ref = req.body?.data?.transaction?.reference || req.body?.referencia;
     const status = req.body?.data?.transaction?.status || req.body?.estado;
     const wompiId = req.body?.data?.transaction?.id || null;
@@ -1312,6 +1401,11 @@ app.get('/api/whatsapp/cloud/estado/:id', (req, res) => {
 });
 app.post('/api/webhooks/whatsapp', (req, res) => {
   try {
+    // Token opcional compartido para aceptar solo eventos del proveedor
+    const tokenEsperado = process.env.WHATSAPP_WEBHOOK_TOKEN;
+    if (tokenEsperado && req.headers['x-webhook-token'] !== tokenEsperado) {
+      return res.status(401).json({ error: 'No autorizado' });
+    }
     const { id, estado } = req.body;
     if (id && estado) db.prepare('UPDATE envios_whatsapp SET estado=? WHERE id=?').run(estado, id);
     res.json({ ok: true });
@@ -3007,7 +3101,9 @@ app.get('/api/public/rifa/:id', (req, res) => {
 
 // -------------------------------- BACKUP ------------------------------------
 
-app.get('/api/backup', async (req, res) => {
+// El backup contiene TODA la base (incluye hashes de contraseñas): solo
+// administradores (nunca vendedores), con límite de operaciones.
+app.get('/api/backup', operacionesLimiter, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     // Volcar lo último a Blob (si corresponde) y a disco antes de empaquetar
     if (persist.habilitado() && dbSucio) {
@@ -3015,8 +3111,8 @@ app.get('/api/backup', async (req, res) => {
       if (r && r.conflicto) return res.status(409).json({ error: 'Los datos cambiaron en el servidor. Recarga e inténtalo de nuevo.' });
     }
     const bufferDb = db.exportar();
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    fs.writeFileSync(dbPath, bufferDb); // en Vercel dbPath vive en /tmp (escribible)
+    // Escritura atómica: nunca deja el archivo a medias
+    if (typeof db._save === 'function') db._save();
     const fecha = new Date().toISOString().slice(0, 10);
     const archive = archiver('zip', { zlib: { level: 9 } });
     res.attachment(`backup-rifas-${fecha}.zip`);
@@ -3054,7 +3150,7 @@ app.get('/api/backup', async (req, res) => {
 // La carga directa evita enviar backups grandes dentro del payload de la función
 // serverless (límite de Vercel). El archivo se sube primero al Blob privado y
 // solo se envía su pathname pequeño a esta función.
-app.post('/api/blob-upload', async (req, res) => {
+app.post('/api/blob-upload', operacionesLimiter, async (req, res) => {
   try {
     // handleUpload NO acepta OIDC: genera los tokens de cliente únicamente a
     // partir de BLOB_READ_WRITE_TOKEN. Sin él, el SDK del navegador oculta el
@@ -3104,7 +3200,7 @@ app.post('/api/blob-upload', async (req, res) => {
   }
 });
 
-app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
+app.post('/api/restore', operacionesLimiter, requireRole('super_admin'), uploadDb.single('backup'), async (req, res) => {
   // En Vercel sin Blob la restauración solo viviría en la instancia actual
   // (y se perdería al reciclarla): mejor fallar con instrucciones claras.
   if (persist.faltaToken()) {
@@ -3141,10 +3237,17 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
   if (!backupBuffer) return res.status(400).json({ error: 'No se envió archivo' });
 
   const esZip = /\.zip$/i.test(backupName) || backupMime.includes('zip');
+
+  // Nunca restaurar un archivo dañado: dejaría la app inoperante al reiniciar.
+  if (!esZip && !(await validarBufferDb(backupBuffer))) {
+    return res.status(400).json({ error: 'El archivo .db está dañado o no es una base SQLite válida.' });
+  }
   // El proceso de extracción necesita un directorio temporal escribible.
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rifas-restore-'));
 
   try {
+    // Copia de seguridad del estado actual por si la restauración sale mal
+    try { if (fs.existsSync(dbPath)) fs.copyFileSync(dbPath, `${dbPath}.bak-antes-restore`); } catch (e) {}
     // Volcar y cerrar conexión actual
     if (typeof db._save === 'function') db._save();
     db.close();
@@ -3182,11 +3285,16 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
       }
       const dbExtraido = path.join(tmpDir, 'rifas.db');
       if (!fs.existsSync(dbExtraido)) throw new Error('El archivo .zip no contiene rifas.db');
-      // Reemplazar la base: copiarla a la ruta activa (dbPath, escribible en
-      // Vercel porque vive en /tmp) y reabrirla AHÍ, para que los siguientes
-      // guardados no apunten al temporal del zip.
+      // Verificar integridad del rifas.db extraído antes de reemplazar el activo
+      const bufferExtraido = fs.readFileSync(dbExtraido);
+      if (!(await validarBufferDb(bufferExtraido))) throw new Error('El rifas.db del backup está dañado');
+      // Reemplazar la base de forma atómica: copiarla a la ruta activa (dbPath,
+      // escribible en Vercel porque vive en /tmp) y reabrirla AHÍ, para que los
+      // siguientes guardados no apunten al temporal del zip.
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      fs.copyFileSync(dbExtraido, dbPath);
+      const tmpDb = `${dbPath}.restore-tmp-${Date.now()}`;
+      fs.writeFileSync(tmpDb, bufferExtraido);
+      fs.renameSync(tmpDb, dbPath);
       db = await initDB(dbPath, dbPath);
       ensureSchema(db);
       // Volcar las imágenes/pósters sobre uploads/
@@ -3198,7 +3306,9 @@ app.post('/api/restore', requireRole('super_admin'), uploadDb.single('backup'), 
     } else {
       // Mismo criterio: persistir en la ruta activa, no en el temporal.
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      fs.writeFileSync(dbPath, backupBuffer);
+      const tmpDb = `${dbPath}.restore-tmp-${Date.now()}`;
+      fs.writeFileSync(tmpDb, backupBuffer);
+      fs.renameSync(tmpDb, dbPath);
       db = await initDB(dbPath, dbPath);
       ensureSchema(db);
     }
@@ -3267,10 +3377,23 @@ app.get('*', (req, res) => {
 // "Error de red". Aquí se loguea el fallo real (visible en los logs de
 // Railway/consola) y se responde JSON para que el toast muestre el motivo.
 app.use((err, req, res, next) => {
-  const estado = err?.status || err?.statusCode || 500;
+  let estado = err?.status || err?.statusCode || 500;
+  let mensaje = err?.message || 'Error interno del servidor';
+
+  // Errores conocidos de multer / tamaño de petición
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    estado = 413;
+    mensaje = 'El archivo supera el tamaño máximo permitido.';
+  } else if (typeof err?.code === 'string' && err.code.startsWith('LIMIT_')) {
+    estado = 400;
+    mensaje = 'Solicitud inválida.';
+  }
+
   console.error('[ERROR]', req.method, req.originalUrl, '-', err?.stack || err?.message || err);
   if (res.headersSent) return next(err);
-  res.status(estado).json({ error: err?.message || 'Error interno del servidor' });
+  // No filtrar detalles internos en errores 5xx
+  if (estado >= 500) mensaje = 'Error interno del servidor';
+  res.status(estado).json({ error: mensaje });
 });
 
 // -------------------------------- ARRANQUE ------------------------------------
@@ -3331,6 +3454,15 @@ setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
 
   return app;
 } // fin startApp()
+
+// Red de seguridad del proceso: deja rastro de fallos no controlados.
+process.on('unhandledRejection', (motivo) => {
+  console.error('[PROCESO] Promesa rechazada sin manejar:', motivo);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[PROCESO] Excepción no capturada:', err);
+  process.exit(1); // el supervisor (Railway) reinicia; la base ya se recupera sola
+});
 
 const appReady = startApp();
 

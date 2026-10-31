@@ -33,6 +33,30 @@ function generarCaptcha() {
   return { pregunta: `¿Cuánto es ${a} ${op} ${b}?`, respuesta };
 }
 window._captchaActual = null;
+
+// Captcha del SERVIDOR: el id viaja al backend y allí se valida de verdad
+// (el captcha local es solo respaldo visual). Se exige tras varios fallos.
+async function cargarCaptcha() {
+  try {
+    const r = await fetch('/api/auth/captcha');
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.id) {
+        window._captchaActual = { id: d.id, pregunta: d.pregunta, respuesta: null };
+        return window._captchaActual;
+      }
+    }
+  } catch (e) { /* sin red: se usa el captcha local */ }
+  window._captchaActual = generarCaptcha();
+  return window._captchaActual;
+}
+
+function pintarCaptcha() {
+  const preguntaEl = document.getElementById('login-captcha-pregunta');
+  const respuestaEl = document.getElementById('login-captcha-respuesta');
+  if (preguntaEl && window._captchaActual) preguntaEl.textContent = window._captchaActual.pregunta;
+  if (respuestaEl) { respuestaEl.value = ''; respuestaEl.removeAttribute('aria-invalid'); }
+}
 function esChance4D(rifa) {
   return !!rifa && rifa.modalidad_boleta === 'CHANCE_INDIVIDUAL' && Number(rifa.cifras || 4) >= 4;
 }
@@ -96,12 +120,9 @@ function mostrarLogin() {
   const el = document.getElementById('login-screen');
   el.style.display = 'flex';
   document.getElementById('app-shell').style.display = 'none';
-  // Generar CAPTCHA al mostrar login
-  window._captchaActual = generarCaptcha();
-  const preguntaEl = document.getElementById('login-captcha-pregunta');
-  const respuestaEl = document.getElementById('login-captcha-respuesta');
-  if (preguntaEl) preguntaEl.textContent = window._captchaActual.pregunta;
-  if (respuestaEl) { respuestaEl.value = ''; respuestaEl.removeAttribute('aria-invalid'); }
+  // Captcha generado y validado por el servidor
+  window._captchaActual = null;
+  cargarCaptcha().then(pintarCaptcha);
 }
 
 function mostrarApp() {
@@ -133,9 +154,9 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const errDiv = document.getElementById('login-error');
   errDiv.style.display = 'none';
 
-  // Validar CAPTCHA
+  // Validar CAPTCHA local (solo si es el captcha generado en el navegador)
   const captchaInput = document.getElementById('login-captcha-respuesta');
-  if (captchaInput && window._captchaActual) {
+  if (captchaInput && window._captchaActual && typeof window._captchaActual.respuesta === 'number') {
     const respuesta = parseInt(captchaInput.value, 10);
     if (respuesta !== window._captchaActual.respuesta) {
       errDiv.textContent = '❌ Respuesta incorrecta. Intenta de nuevo.';
@@ -158,7 +179,13 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuario, password, remember })
+      body: JSON.stringify({
+        usuario,
+        password,
+        remember,
+        captchaId: window._captchaActual?.id || null,
+        captchaRespuesta: captchaInput ? String(captchaInput.value || '').trim() : ''
+      })
     });
     data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Credenciales inválidas');
@@ -171,6 +198,8 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     errDiv.textContent = err.message;
     errDiv.style.display = 'block';
     errDiv.classList.remove('shake'); void errDiv.offsetWidth; errDiv.classList.add('shake');
+    // Si el servidor exige captcha (tras varios fallos), renovarlo
+    if (data && data.captchaRequerido) { cargarCaptcha().then(pintarCaptcha); }
     // Si la cuenta quedó bloqueada, deshabilitar el formulario por el tiempo indicado
     if (data && data.bloqueo) {
       const segundos = Number(data.retryAfter) || 0;
@@ -1448,8 +1477,9 @@ async function renderResumen(rifa, d) {
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-excel','rifa-${rifa.id}.xlsx')">⬇️ Excel</button>
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/rifas/${rifa.id}/exportar-csv','rifa-${rifa.id}.csv')">📄 CSV</button>
           <button class="btn btn-outline btn-sm" onclick="exportarReportePDF(${rifa.id})">📋 PDF</button>
+          ${['super_admin', 'admin'].includes(state.usuario?.rol) ? `
           <button class="btn btn-outline btn-sm" onclick="descargarAutenticada('/api/backup','backup-rifas.zip')">💾 Backup (.zip)</button>
-          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup</button>
+          <button class="btn btn-outline btn-sm" onclick="abrirRestoreModal()">📂 Restaurar backup</button>` : ''}
         </div>
       </div>
     </div>
