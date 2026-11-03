@@ -1,0 +1,36 @@
+# Dependencias (se instalan en el servidor según su plataforma)
+node_modules/
+
+# Sesión de WhatsApp (local auth, no subir)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Base de datos local (se crea en el servidor / volumen)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.bak-*
+data/*.corrupt-*
+
+# Respaldos locales generados
+backups/
+
+# Logs / temporales
+*.log
+npm-debug.log*
+.DS_Store
+
+# Variables de entorno (nunca subir secretos)
+.env
+
+# Auditoría local (no subir hasta autorizar)
+AUDIT.md
+
+# Posters generados (se crean en runtime)
+uploads/poster-*.png
+
+# Uploads (imágenes subidas por usuarios)
+uploads/
+
+# PDFs temporales
+*.pdf
