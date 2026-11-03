@@ -3651,13 +3651,20 @@ async function startApp() {
     intentarPuerto(PORT_BASE);
   }
 
-  // Revisión periódica de números vencidos (cada 10 minutos) para todas las rifas activas
-  setInterval(() => {
-    const activas = db.prepare("SELECT id FROM rifas WHERE estado='activa'").all();
-    activas.forEach(r => liberarVencidos(r.id));
-  }, 10 * 60 * 1000);
+  // Tareas periódicas en segundo plano (solo en servidores persistentes como Railway/VPS, nunca en Vercel Serverless)
+  if (!process.env.VERCEL) {
+    // Revisión periódica de números vencidos (cada 10 minutos) para todas las rifas activas
+    setInterval(() => {
+      try {
+        const activas = db.prepare("SELECT id FROM rifas WHERE estado='activa'").all();
+        activas.forEach(r => liberarVencidos(r.id));
+      } catch (e) { console.error('[Vencidos] Error en revisión periódica:', e.message); }
+    }, 10 * 60 * 1000);
 
-  // Purge automático de papelera: rifas eliminadas hace >30 días se borran permanentemente (cada 24h)
+    // Purge automático de papelera: rifas eliminadas hace >30 días se borran permanentemente (cada 24h)
+    setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
+  }
+
   function purgarPapeleraVencida() {
     try {
       const vencidas = db.prepare("SELECT id, nombre FROM rifas WHERE borrada_en IS NOT NULL AND borrada_en < datetime('now', '-30 days', 'localtime')").all();
@@ -3677,7 +3684,6 @@ async function startApp() {
       purgar();
     } catch (e) { console.error('[Papelera] Error en purge automático:', e.message); }
   }
-  setInterval(purgarPapeleraVencida, 24 * 60 * 60 * 1000);
 
   // Respaldo automático periódico (configurable por variable de entorno BACKUP_CADA_HORAS, ej: 6 ó 12)
   const horasBackup = Number(process.env.BACKUP_CADA_HORAS || 0);

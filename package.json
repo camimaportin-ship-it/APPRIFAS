@@ -11,7 +11,7 @@
     "client": "node -e \"console.log('Frontend servido por Express en http://localhost:3000 (offline-first, sin build step)')\" && node backend/watch-noop.js",
     "dev": "concurrently -n SERVER,CLIENT -c blue,green \"npm run server\" \"npm run client\"",
     "start": "node server.js",
-    "build": "vite build",
+    "build": "node -e \"console.log('[Build] Rifas SYC listo para produccion')\"",
     "preview": "vite preview",
     "lint": "eslint server.js backend/ src/ tests/ --ext .js",
     "format": "prettier --write \"**/*.{js,json,md}\"",
@@ -20,7 +20,8 @@
     "db:backup": "node scripts/backup-db.js",
     "db:backup:list": "node scripts/backup-db.js --list",
     "db:backup:verify": "node scripts/backup-db.js --verify",
-    "postinstall": "node -e \"console.log('[Rifas SYC] Dependencias instaladas. Ejecuta: npm start')\""
+    "postinstall": "node -e \"console.log('[Rifas SYC] Dependencias instaladas. Ejecuta: npm start')\"",
+    "build:vite": "vite build"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.7",

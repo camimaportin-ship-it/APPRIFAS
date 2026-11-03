@@ -1,17 +1,27 @@
 {
   "version": 2,
-  "builds": [{
-    "src": "api/index.js",
-    "use": "@vercel/node",
-    "config": {
-      "includeFiles": ["assets/sql-wasm.wasm"]
+  "builds": [
+    {
+      "src": "api/index.js",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "assets/**",
+          "frontend/**",
+          "fonts/**",
+          "backend/**",
+          "src/**"
+        ]
+      }
     }
-  }],
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.js"
+    }
+  ],
   "env": {
     "PUPPETEER_SKIP_DOWNLOAD": "true"
-  },
-  "installCommand": "PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts",
-  "routes": [
-    { "src": "/(.*)", "dest": "/api/index.js" }
-  ]
+  }
 }
