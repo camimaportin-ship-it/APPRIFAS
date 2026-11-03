@@ -1209,32 +1209,75 @@ async function startApp() {
     return vencidos.length;
   }
 
-  // Calcula los KPI principales de una rifa
+  // Calcula los KPI principales de una rifa basados en las boletas/números reales
   function calcularDashboard(rifaId, rifaCache) {
     const rifa = rifaCache || db.prepare('SELECT * FROM rifas WHERE id = ?').get(rifaId);
     if (!rifa) return null;
-    const totalNumeros = esChance(rifa)
-      ? totalTicketsChance(rifa)
-      : (rifa.rango_max - rifa.rango_min + 1);
-    const stats = db.prepare("SELECT SUM(CASE WHEN estado_pago='pagado' THEN 1 ELSE 0 END) as pagados, SUM(CASE WHEN estado_pago='pendiente' THEN 1 ELSE 0 END) as pendientes FROM participantes WHERE rifa_id = ?").get(rifaId);
-    const pagados = stats.pagados || 0;
-    const pendientes = stats.pendientes || 0;
-    const vendidos = pagados + pendientes;
-    const recaudado = pagados * rifa.valor_boleta;
-    const potencial = rifa.cantidad_max_participantes * rifa.valor_boleta;
-    const porcentaje = rifa.cantidad_max_participantes > 0
-      ? Math.min(100, Math.round((vendidos / rifa.cantidad_max_participantes) * 100))
-      : 0;
-    let quedan;
-    if (rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES') {
+
+    let pagados = 0;
+    let pendientes = 0;
+    let vendidos = 0;
+    let quedan = 0;
+    let totalNumeros = 0;
+
+    if (esChance(rifa)) {
+      totalNumeros = totalTicketsChance(rifa);
+      const stats = db.prepare(`
+        SELECT 
+          SUM(CASE WHEN estado='pagado' THEN 1 ELSE 0 END) as pagados,
+          SUM(CASE WHEN estado='pendiente' THEN 1 ELSE 0 END) as pendientes,
+          SUM(CASE WHEN estado='libre' THEN 1 ELSE 0 END) as libres
+        FROM boletas_chance WHERE rifa_id = ?
+      `).get(rifaId);
+      pagados = stats?.pagados || 0;
+      pendientes = stats?.pendientes || 0;
+      vendidos = pagados + pendientes;
+      quedan = stats?.libres != null ? stats.libres : Math.max(0, totalNumeros - vendidos);
+    } else if (rifa.modalidad_boleta === 'CUATRO_OPORTUNIDADES') {
       const grupos = asegurarGrupos(rifa);
-      quedan = estadosGruposBulk(rifa, grupos).filter(e => e.estado === 'libre').length;
+      totalNumeros = grupos.length;
+      const estados = estadosGruposBulk(rifa, grupos);
+      pagados = estados.filter(e => e.estado === 'pagado').length;
+      pendientes = estados.filter(e => e.estado === 'pendiente' || e.estado === 'ocupado').length;
+      vendidos = pagados + pendientes;
+      quedan = estados.filter(e => e.estado === 'libre').length;
     } else {
-      const limite = rifa.cantidad_max_participantes === 0
-        ? (rifa.rango_max - rifa.rango_min + 1)
-        : rifa.cantidad_max_participantes;
-      quedan = Math.max(0, limite - vendidos);
+      totalNumeros = (rifa.rango_max - rifa.rango_min + 1);
+      const stats = db.prepare(`
+        SELECT 
+          SUM(CASE WHEN estado='pagado' THEN 1 ELSE 0 END) as pagados,
+          SUM(CASE WHEN estado='pendiente' THEN 1 ELSE 0 END) as pendientes,
+          SUM(CASE WHEN estado='libre' THEN 1 ELSE 0 END) as libres
+        FROM numeros WHERE rifa_id = ?
+      `).get(rifaId);
+
+      if (stats && (stats.libres != null || stats.pagados != null || stats.pendientes != null)) {
+        pagados = stats.pagados || 0;
+        pendientes = stats.pendientes || 0;
+        vendidos = pagados + pendientes;
+        const limite = rifa.cantidad_max_participantes === 0
+          ? totalNumeros
+          : rifa.cantidad_max_participantes;
+        quedan = stats.libres != null ? stats.libres : Math.max(0, limite - vendidos);
+      } else {
+        const statsP = db.prepare("SELECT SUM(CASE WHEN estado_pago='pagado' THEN 1 ELSE 0 END) as pagados, SUM(CASE WHEN estado_pago='pendiente' THEN 1 ELSE 0 END) as pendientes FROM participantes WHERE rifa_id = ?").get(rifaId);
+        pagados = statsP?.pagados || 0;
+        pendientes = statsP?.pendientes || 0;
+        vendidos = pagados + pendientes;
+        const limite = rifa.cantidad_max_participantes === 0
+          ? totalNumeros
+          : rifa.cantidad_max_participantes;
+        quedan = Math.max(0, limite - vendidos);
+      }
     }
+
+    const recaudado = pagados * rifa.valor_boleta;
+    const maxBoletas = rifa.cantidad_max_participantes > 0 ? rifa.cantidad_max_participantes : totalNumeros;
+    const potencial = maxBoletas * rifa.valor_boleta;
+    const porcentaje = maxBoletas > 0
+      ? Math.min(100, Math.round((vendidos / maxBoletas) * 100))
+      : 0;
+
     return { rifa, totalNumeros, pagados, pendientes, vendidos, recaudado, potencial, porcentaje, quedan };
   }
 
@@ -1551,16 +1594,19 @@ async function startApp() {
 
       const rifas = db.prepare(`
       SELECT r.id, r.nombre, r.producto, r.estado, r.valor_boleta, r.modalidad_boleta,
-             r.fecha_sorteo, r.cantidad_max_participantes,
-             COUNT(part.id) as vendidos,
-             SUM(CASE WHEN part.estado_pago='pagado' THEN 1 ELSE 0 END) as pagados,
-             SUM(CASE WHEN part.estado_pago='pendiente' THEN 1 ELSE 0 END) as pendientes
+             r.fecha_sorteo, r.cantidad_max_participantes
       FROM rifas r
-      LEFT JOIN participantes part ON r.id = part.rifa_id
       WHERE r.borrada_en IS NULL
-      GROUP BY r.id
       ORDER BY r.estado = 'activa' DESC, r.fecha_sorteo ASC
-    `).all();
+    `).all().map(r => {
+      const d = calcularDashboard(r.id, r);
+      return {
+        ...r,
+        vendidos: d.vendidos,
+        pagados: d.pagados,
+        pendientes: d.pendientes
+      };
+    });
 
       const participantesRecientes = db.prepare(`
       SELECT part.id, part.nombre, part.cedula, part.telefono, part.estado_pago,
@@ -2156,11 +2202,11 @@ async function startApp() {
         : db.prepare('INSERT INTO participantes (rifa_id, nombre, cedula, telefono, numero, numeros, estado_pago, fecha_pago, metodo_pago, observacion) VALUES (?,?,?,?,?,?,?,?,?,?)')
           .run(rifaId, nombreLimpio, cedulaLimpia, telefonoLimpio, elegidos[0], JSON.stringify(elegidos), pagoEstado, pagoFecha, metodo_pago || null, observacion || null);
       if (chance) {
-        db.prepare("UPDATE boletas_chance SET estado='pendiente', participante_id=?, fecha_reservado=datetime('now','localtime') WHERE id=?")
-          .run(info.lastInsertRowid, boletaChance.id);
+        db.prepare("UPDATE boletas_chance SET estado=?, participante_id=?, fecha_reservado=datetime('now','localtime') WHERE id=?")
+          .run(pagoEstado, info.lastInsertRowid, boletaChance.id);
       } else {
-        const marcar = db.prepare('UPDATE numeros SET estado=\'pendiente\', participante_id=?, fecha_reservado=datetime(\'now\',\'localtime\') WHERE rifa_id=? AND numero=?');
-        for (const n of elegidos) marcar.run(info.lastInsertRowid, rifaId, n);
+        const marcar = db.prepare('UPDATE numeros SET estado=?, participante_id=?, fecha_reservado=datetime(\'now\',\'localtime\') WHERE rifa_id=? AND numero=?');
+        for (const n of elegidos) marcar.run(pagoEstado, info.lastInsertRowid, rifaId, n);
       }
       return info.lastInsertRowid;
     });

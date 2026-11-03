@@ -115,8 +115,20 @@ export async function renderResumenModular(rifa, d, deps = {}) {
       : `<div class="empty-state" style="padding:20px;"><div class="icon">🎟️</div><p>No quedan números disponibles</p></div>`;
   }
 
+  const pagados = numeros.filter(n => n.estado === 'pagado');
+  const pendientes = numeros.filter(n => n.estado === 'pendiente');
+  const gruposPagados = grupos.filter(g => g.estado === 'pagado');
+  const gruposPendientes = grupos.filter(g => g.estado === 'pendiente' || g.estado === 'ocupado');
+
+  const boletasPagadasVal = esCuatro ? gruposPagados.length : (esChance ? chancePagadas.length : (numeros.length ? pagados.length : d.pagados));
+  const boletasPendientesVal = esCuatro ? gruposPendientes.length : (esChance ? chancePendientes.length : (numeros.length ? pendientes.length : d.pendientes));
   const etiquetaRestantes = esCuatro ? 'Grupos restantes' : (esChance ? 'Boletas restantes' : 'Números restantes');
-  const restantesValor = esCuatro ? gruposLibres.length : d.quedan;
+  const restantesValor = esCuatro ? gruposLibres.length : (esChance ? chanceLibres.length : (numeros.length ? libres.length : d.quedan));
+  const totalRecaudadoVal = boletasPagadasVal * rifa.valor_boleta;
+  const vendidasVal = esCuatro ? (grupos.length - gruposLibres.length) : (esChance ? (boletasChance.length - chanceLibres.length) : (numeros.length ? (numeros.length - libres.length) : d.vendidos));
+  const totalUnidad = esCuatro ? grupos.length : (esChance ? boletasChance.length : (rifa.cantidad_max_participantes || numeros.length || 1));
+  const pctVentas = totalUnidad > 0 ? Math.min(100, Math.round((vendidasVal / totalUnidad) * 100)) : d.porcentaje;
+
   return `
     <div class="quick-actions mb-4">
       <a class="qa" href="#rifas/${rifa.id}/participantes"><div class="qa-icon">👥</div><div><strong>Registrar / pagar</strong><span>Participantes y boletas</span></div></a>
@@ -126,15 +138,15 @@ export async function renderResumenModular(rifa, d, deps = {}) {
     </div>
 
     <div class="kpi-grid mb-4">
-      <div class="kpi kpi-gold"><div class="kpi-label">Total recaudado</div><div class="kpi-value">${fmtCOP(d.recaudado)}</div></div>
-      <div class="kpi"><div class="kpi-label">Boletas pagadas</div><div class="kpi-value">${esChance ? chancePagadas.length : d.pagados}</div></div>
-      <div class="kpi"><div class="kpi-label">Boletas pendientes</div><div class="kpi-value">${esChance ? chancePendientes.length : d.pendientes}</div></div>
+      <div class="kpi kpi-gold"><div class="kpi-label">Total recaudado</div><div class="kpi-value">${fmtCOP(totalRecaudadoVal)}</div></div>
+      <div class="kpi"><div class="kpi-label">Boletas pagadas</div><div class="kpi-value">${boletasPagadasVal}</div></div>
+      <div class="kpi"><div class="kpi-label">Boletas pendientes</div><div class="kpi-value">${boletasPendientesVal}</div></div>
       <div class="kpi"><div class="kpi-label">${etiquetaRestantes}</div><div class="kpi-value">${restantesValor}</div></div>
     </div>
 
     <div class="card card-pad mb-4">
-      <div class="flex justify-between mb-2"><strong>Progreso de ventas</strong><span>${d.porcentaje}%</span></div>
-      <div class="progress-track"><div class="progress-fill" style="width:${d.porcentaje}%"></div></div>
+      <div class="flex justify-between mb-2"><strong>Progreso de ventas</strong><span>${pctVentas}%</span></div>
+      <div class="progress-track"><div class="progress-fill" style="width:${pctVentas}%"></div></div>
     </div>
 
     <div class="card card-pad mb-4">
