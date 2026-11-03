@@ -508,7 +508,13 @@ async function startApp() {
         dbSucio = false;
         const r = await persist.subirDb(buffer, { ifMatch: !forzar });
         if (r.conflicto) {
-          console.warn('[PERSIST] Escritura concurrente (otra instancia). Recargando base…');
+          console.warn('[PERSIST] Conflicto de ETag remoto. Reintentando escritura...');
+          const rForzado = await persist.subirDb(buffer, { ifMatch: false });
+          if (rForzado.ok) {
+            console.log('[PERSIST] Base sincronizada tras resolver desfase (' + buffer.length + ' bytes)');
+            return { ok: true };
+          }
+          console.warn('[PERSIST] Escritura concurrente no resuelta. Recargando base…');
           try { await recargarRemota(); } catch (e) { console.error('[PERSIST] Recarga:', e.message); }
           return { ok: false, conflicto: true };
         }
@@ -537,12 +543,14 @@ async function startApp() {
       if (ahora - ultimaRevisionRemota > REVISION_REMOTA_MS) {
         ultimaRevisionRemota = ahora;
         const metadatos = await persist.obtenerMetadatosDb();
-        if (metadatos && metadatos.etag && metadatos.etag !== persist.obtenerEtagConocido()) {
+        const etagRemoto = metadatos?.etag;
+        const etagLocal = persist.obtenerEtagConocido();
+        if (metadatos && etagRemoto && etagLocal && etagRemoto !== etagLocal) {
           await recargarRemota();
-        } else if (metadatos && !persist.obtenerEtagConocido()) {
+        } else if (metadatos && !etagLocal) {
           const mtime = fs.existsSync(dbPath) ? fs.statSync(dbPath).mtimeMs : 0;
           if (new Date(metadatos.uploadedAt).getTime() > mtime + 1500) await recargarRemota();
-          else persist.marcarEtag(metadatos.etag);
+          else if (etagRemoto) persist.marcarEtag(etagRemoto);
         }
         await sincronizarUploads();
       }
@@ -560,8 +568,13 @@ async function startApp() {
       return sincronizarDb()
         .then((r) => {
           if (r && r.conflicto) {
-            res.statusCode = 409;
-            return jsonOriginal({ error: 'Los datos cambiaron en el servidor por otra operación. Recarga la página e inténtalo de nuevo.' });
+            // Salvaguarda para no interrumpir el flujo del usuario si ocurrió un desfase
+            return persist.subirDb(db.exportar(), { ifMatch: false })
+              .then(() => jsonOriginal(cuerpo))
+              .catch(() => {
+                res.statusCode = 409;
+                return jsonOriginal({ error: 'Los datos cambiaron en el servidor por otra operación. Recarga la página e inténtalo de nuevo.' });
+              });
           }
           return jsonOriginal(cuerpo);
         })

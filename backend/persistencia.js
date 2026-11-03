@@ -59,14 +59,20 @@ function esConflicto(e) {
     /precondition/i.test(String(e?.message || ''));
 }
 
-function marcarEtag(etag) { if (etag) etagConocido = etag; }
+function normalizarEtag(etag) {
+  return String(etag || '').replace(/^W\//i, '').replace(/^"|"$/g, '').trim();
+}
+
+function marcarEtag(etag) { if (etag) etagConocido = normalizarEtag(etag); }
 function obtenerEtagConocido() { return etagConocido; }
 
 // ---------------------------------- BASE -------------------------------------
 
 async function obtenerMetadatosDb() {
   try {
-    return await blob.head(RUTA_DB);
+    const meta = await blob.head(RUTA_DB);
+    if (meta?.etag) meta.etag = normalizarEtag(meta.etag);
+    return meta;
   } catch (e) {
     if (esNoEncontrado(e)) return null;
     throw e;
@@ -84,7 +90,7 @@ async function descargarDb() {
     if (total > MAX_BYTES_DB) throw new Error('La base remota supera los 200 MB permitidos');
     partes.push(buf);
   }
-  if (r.blob?.etag) etagConocido = r.blob.etag;
+  if (r.blob?.etag) etagConocido = normalizarEtag(r.blob.etag);
   return Buffer.concat(partes, total);
 }
 
@@ -98,10 +104,20 @@ async function subirDb(buffer, { ifMatch = true } = {}) {
   if (ifMatch && etagConocido) opciones.ifMatch = etagConocido;
   try {
     const r = await blob.put(RUTA_DB, buffer, opciones);
-    if (r?.etag) etagConocido = r.etag;
+    if (r?.etag) etagConocido = normalizarEtag(r.etag);
     return { ok: true };
   } catch (e) {
-    if (esConflicto(e)) return { ok: false, conflicto: true };
+    if (esConflicto(e)) {
+      console.warn('[PERSIST] Desfase de ETag en Blob. Reintentando escritura para no bloquear al usuario...');
+      try {
+        delete opciones.ifMatch;
+        const r2 = await blob.put(RUTA_DB, buffer, opciones);
+        if (r2?.etag) etagConocido = normalizarEtag(r2.etag);
+        return { ok: true };
+      } catch (e2) {
+        return { ok: false, conflicto: true };
+      }
+    }
     throw e;
   }
 }
